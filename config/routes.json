@@ -1,0 +1,107 @@
+[
+  {
+    "id": "mad-auth",
+    "enabled": true,
+    "prefix": "/auth",
+    "rewritePrefix": "/auth",
+    "upstreamEnv": "AUTH_API_URL",
+    "roles": ["MANAGER"],
+    "readOnlyRoles": [],
+    "endpoints": [
+      { "path": "/login", "method": "POST", "access": "public" },
+      { "path": "/session", "method": "GET", "access": "password-change" },
+      { "path": "/logout", "method": "POST", "access": "logout" },
+      {
+        "path": "/change-password",
+        "method": "POST",
+        "access": "password-change"
+      }
+    ]
+  },
+  {
+    "id": "mad",
+    "enabled": true,
+    "prefix": "/mad",
+    "rewritePrefix": "/mad",
+    "upstreamEnv": "MAD_SERVICE_URL",
+    "roles": ["MANAGER"],
+    "readOnlyRoles": [],
+    "endpoints": []
+  },
+  {
+    "id": "hw",
+    "enabled": false,
+    "prefix": "/hw",
+    "rewritePrefix": "/hw",
+    "upstreamEnv": "HW_SERVICE_URL",
+    "roles": ["MANAGER"],
+    "readOnlyRoles": [],
+    "endpoints": []
+  },
+  {
+    "id": "fds",
+    "enabled": false,
+    "prefix": "/fds",
+    "rewritePrefix": "/fds",
+    "upstreamEnv": "FDS_SERVICE_URL",
+    "roles": ["RECEPTIONIST"],
+    "readOnlyRoles": ["MANAGER"],
+    "endpoints": []
+  },
+  {
+    "id": "foss",
+    "enabled": false,
+    "prefix": "/foss",
+    "rewritePrefix": "/foss",
+    "upstreamEnv": "FOSS_SERVICE_URL",
+    "roles": ["GUEST"],
+    "readOnlyRoles": [],
+    "endpoints": []
+  },
+  {
+    "id": "kms",
+    "enabled": false,
+    "prefix": "/kms",
+    "rewritePrefix": "/kms",
+    "upstreamEnv": "KMS_SERVICE_URL",
+    "roles": ["KITCHEN_STAFF", "KITCHEN_MANAGER"],
+    "readOnlyRoles": [],
+    "endpoints": []
+  },
+  {
+    "id": "wkms",
+    "enabled": false,
+    "prefix": "/wkms",
+    "rewritePrefix": "/wkms",
+    "upstreamEnv": "WKMS_SERVICE_URL",
+    "roles": ["WORKER"],
+    "readOnlyRoles": ["MANAGER"],
+    "endpoints": []
+  },
+  {
+    "id": "identity",
+    "enabled": false,
+    "prefix": "/identity",
+    "rewritePrefix": "/auth",
+    "upstreamEnv": "IDENTITY_SERVICE_URL",
+    "roles": [
+      "MANAGER",
+      "RECEPTIONIST",
+      "KITCHEN_STAFF",
+      "KITCHEN_MANAGER",
+      "WORKER",
+      "GUEST"
+    ],
+    "readOnlyRoles": [],
+    "endpoints": [
+      { "path": "/login", "method": "POST", "access": "public" },
+      { "path": "/session", "method": "GET", "access": "password-change" },
+      { "path": "/logout", "method": "POST", "access": "logout" },
+      {
+        "path": "/change-password",
+        "method": "POST",
+        "access": "password-change"
+      }
+    ]
+  }
+]

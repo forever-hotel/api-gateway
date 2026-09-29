@@ -1,0 +1,19 @@
+{
+  email {$ACME_EMAIL}
+}
+
+{$GATEWAY_DOMAIN} {
+  # Caddy manages HTTPS issuance/renewal. Do not enable URI access logging:
+  # query parameters can contain guest identifiers or other sensitive data.
+  header Strict-Transport-Security "max-age=31536000"
+  request_body {
+    max_size 1MB
+  }
+  reverse_proxy gateway:8080 {
+    # Replace client-supplied forwarding headers with the real edge peer.
+    header_up X-Forwarded-For {remote_host}
+    header_up -X-User-Id
+    header_up -X-User-Role
+    header_up -X-Room-Number
+  }
+}

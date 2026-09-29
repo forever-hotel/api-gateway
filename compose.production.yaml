@@ -1,0 +1,71 @@
+# Standalone file: docker compose --env-file .env.production -f compose.production.yaml up -d
+# Create forever-hotel-internal and attach existing services before deployment.
+services:
+  edge:
+    image: caddy:2-alpine
+    environment:
+      GATEWAY_DOMAIN: ${GATEWAY_DOMAIN:?Set the API DNS name}
+      ACME_EMAIL: ${ACME_EMAIL:?Set the certificate contact email}
+    ports: ['80:80', '443:443']
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      edge:
+        ipv4_address: 172.30.80.2
+    depends_on: [gateway]
+    security_opt: ['no-new-privileges:true']
+    restart: unless-stopped
+  gateway:
+    image: ${GATEWAY_IMAGE:?Set an immutable gateway image tag or digest}
+    env_file: .env.production
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 8080
+      TRUSTED_PROXIES: 172.30.80.2/32
+      REDIS_URL: redis://redis:6379
+    networks: [edge, services]
+    depends_on:
+      redis:
+        condition: service_healthy
+    read_only: true
+    security_opt: ['no-new-privileges:true']
+    cap_drop: [ALL]
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 15s
+  redis:
+    image: redis:7-alpine
+    command:
+      [
+        'redis-server',
+        '--save',
+        '',
+        '--appendonly',
+        'no',
+        '--maxmemory',
+        '128mb',
+        '--maxmemory-policy',
+        'noeviction',
+      ]
+    networks: [edge]
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    security_opt: ['no-new-privileges:true']
+    restart: unless-stopped
+networks:
+  edge:
+    ipam:
+      config:
+        - subnet: 172.30.80.0/24
+  services:
+    external: true
+    name: forever-hotel-internal
+volumes:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,11 @@
+node_modules
+dist
+.test-build
+coverage
+.npm-cache
+.git
+.env
+.env.*
+test
+docs
+*.log
