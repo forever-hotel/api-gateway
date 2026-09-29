@@ -13,8 +13,6 @@ export const unavailable = () =>
     'SERVICE_UNAVAILABLE',
     'Service temporarily unavailable. Please retry.',
   );
-export const unauthorized = () =>
-  new GatewayError(401, 'UNAUTHENTICATED', 'Please sign in again.');
 export const forbidden = () =>
   new GatewayError(
     403,

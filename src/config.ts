@@ -1,15 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { isIP } from 'node:net';
 
-export const ROLES = [
-  'MANAGER',
-  'RECEPTIONIST',
-  'KITCHEN_STAFF',
-  'KITCHEN_MANAGER',
-  'WORKER',
-  'GUEST',
-] as const;
-export type Role = (typeof ROLES)[number];
 export const METHODS = [
   'GET',
   'HEAD',
@@ -18,29 +9,17 @@ export const METHODS = [
   'PATCH',
   'DELETE',
 ] as const;
-export type Access = 'public' | 'protected' | 'password-change' | 'logout';
-export interface Endpoint {
-  path: string;
-  method: string;
-  access: Access;
-}
 export interface Route {
   id: string;
   prefix: string;
   rewritePrefix: string;
   upstream: string;
-  roles: Role[];
-  readOnlyRoles: Role[];
-  endpoints: Endpoint[];
 }
 export interface Config {
   production: boolean;
   host: string;
   port: number;
   logLevel: string;
-  secret: string;
-  issuer: string;
-  authUrl: string;
   origins: string[];
   trustedProxies: string[];
   redisUrl?: string;
@@ -50,7 +29,7 @@ export interface Config {
   bodyLimit: number;
   responseLimit: number;
   upstreamTimeout: number;
-  authTimeout: number;
+  healthTimeout: number;
   routes: Route[];
 }
 function invalid(name: string): never {
@@ -109,12 +88,6 @@ export function loadConfig(
     !['development', 'test', 'production'].includes(env.NODE_ENV)
   )
     invalid('NODE_ENV');
-  const secret = required('JWT_SECRET');
-  if (
-    Buffer.byteLength(secret) < 32 ||
-    (production && secret.startsWith('local-only-'))
-  )
-    invalid('JWT_SECRET');
   const origins = required('ALLOWED_ORIGINS')
     .split(',')
     .map((item) => origin(item.trim(), 'ALLOWED_ORIGINS'));
@@ -158,18 +131,19 @@ export function loadConfig(
     }
   }
   if (!Array.isArray(raw) || !raw.length) invalid('ROUTES_FILE');
-  const roles = (value: unknown): Role[] => {
-    if (
-      !Array.isArray(value) ||
-      value.some((role) => !ROLES.includes(role as Role))
-    )
-      invalid('route roles');
-    return value as Role[];
-  };
   const routes: Route[] = [];
   for (const item of raw as Record<string, unknown>[]) {
     if (!item || typeof item !== 'object' || typeof item.enabled !== 'boolean')
       invalid('route enabled');
+    if (
+      Object.keys(item).some(
+        (key) =>
+          !['id', 'enabled', 'prefix', 'rewritePrefix', 'upstreamEnv'].includes(
+            key,
+          ),
+      )
+    )
+      invalid('route fields (only routing configuration is supported)');
     if (!item.enabled) continue;
     if (
       typeof item.id !== 'string' ||
@@ -182,56 +156,26 @@ export function loadConfig(
       invalid('reserved health prefix');
     if (
       routes.some(
-        (route) =>
-          route.id === item.id ||
-          route.prefix === item.prefix ||
-          route.prefix.startsWith(item.prefix + '/') ||
-          (item.prefix as string).startsWith(route.prefix + '/'),
+        (route) => route.id === item.id || route.prefix === item.prefix,
       )
     )
-      invalid('overlapping routes');
+      invalid('duplicate route id/prefix');
     if (
       typeof item.upstreamEnv !== 'string' ||
       !/^[A-Z_]+$/.test(item.upstreamEnv)
     )
       invalid('route upstreamEnv');
     const upstream = origin(env[item.upstreamEnv], item.upstreamEnv);
-    if (!Array.isArray(item.endpoints)) invalid('route endpoints');
-    const endpoints = item.endpoints as Endpoint[];
-    for (const endpoint of endpoints) {
-      if (
-        !endpoint ||
-        !path(endpoint.path) ||
-        !METHODS.includes(endpoint.method as (typeof METHODS)[number]) ||
-        !['public', 'protected', 'password-change', 'logout'].includes(
-          endpoint.access,
-        )
-      )
-        invalid('route endpoint');
-      if (
-        endpoints.filter(
-          (other) =>
-            other.path === endpoint.path && other.method === endpoint.method,
-        ).length !== 1
-      )
-        invalid('duplicate endpoint');
-      if (endpoint.access === 'logout' && endpoint.method !== 'POST')
-        invalid('logout method');
-    }
-    const allowed = roles(item.roles),
-      readOnly = roles(item.readOnlyRoles);
-    if (!allowed.length && !readOnly.length) invalid('empty role policy');
     routes.push({
       id: item.id,
       prefix: item.prefix,
       rewritePrefix: item.rewritePrefix,
       upstream,
-      roles: allowed,
-      readOnlyRoles: readOnly,
-      endpoints,
     });
   }
   if (!routes.length) invalid('enabled routes');
+  // A subsystem's more specific /mad/auth mapping wins over /mad.
+  routes.sort((a, b) => b.prefix.length - a.prefix.length);
   const logLevel = env.LOG_LEVEL ?? 'info';
   if (!['fatal', 'error', 'warn', 'info', 'debug', 'silent'].includes(logLevel))
     invalid('LOG_LEVEL');
@@ -240,9 +184,6 @@ export function loadConfig(
     host: env.HOST || '127.0.0.1',
     port: integer('PORT', 8080, 1, 65535),
     logLevel,
-    secret,
-    issuer: required('JWT_ISSUER'),
-    authUrl: origin(env.AUTH_SERVICE_URL, 'AUTH_SERVICE_URL'),
     origins,
     trustedProxies,
     redisUrl,
@@ -253,6 +194,6 @@ export function loadConfig(
     bodyLimit: integer('BODY_LIMIT_BYTES', 1048576, 1, 10485760),
     responseLimit: integer('RESPONSE_LIMIT_BYTES', 10485760, 1, 104857600),
     upstreamTimeout: integer('UPSTREAM_TIMEOUT_MS', 4000, 100, 30000),
-    authTimeout: integer('AUTH_TIMEOUT_MS', 2000, 100, 5000),
+    healthTimeout: integer('HEALTH_TIMEOUT_MS', 2000, 100, 5000),
   };
 }

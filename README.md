@@ -1,23 +1,36 @@
 # Forever Hotel API gateway
 
-Self-contained REST gateway for the six Forever Hotel subsystems, with MAD enabled
-first. Copy this entire directory to the root of its own repository. It does not
-import code, environment files, fixtures or packages from the manager dashboard.
+Standalone REST gateway for MAD, HW, FDS, FOSS, KMS and WKMS. Each subsystem
+owns its login, credential storage, token issuance, token/session validation,
+permissions and logout. The gateway only routes API requests and applies
+transport controls: CORS, IP rate limits, bounded bodies, timeouts and request IDs.
 
-Implemented: prefix routing, HS256 JWT verification, central session validation,
-role/method restrictions, first-password-change gating, per-IP rate limiting,
-bounded request/response bodies, upstream timeouts, strict CORS, spoofed-header
-removal, request IDs, redacted errors, structured logs, health endpoints and graceful
-shutdown. Local Docker and production HTTPS/Redis examples are included.
+There is no central login service, JWT signing key, token verification, role check
+or session lookup in this application. Authorization headers are passed unchanged
+to the selected backend. Every backend must protect its own private endpoints.
 
-The central Auth service, business APIs and frontend applications remain separate.
-WebSocket upgrades are explicitly rejected until the realtime authentication
-contract is agreed. This is a REST gateway implementation, not a completed deployment
-of every platform component in the SDS.
+## Routes
+
+| Gateway path | Upstream path | Default  |
+| ------------ | ------------- | -------- |
+| /mad/auth/*  | MAD /auth/*   | Enabled  |
+| /mad/*       | MAD /mad/*    | Enabled  |
+| /hw/*        | HW /hw/*      | Disabled |
+| /fds/*       | FDS /fds/*    | Disabled |
+| /foss/*      | FOSS /foss/*  | Disabled |
+| /kms/*       | KMS /kms/*    | Disabled |
+| /wkms/*      | WKMS /wkms/*  | Disabled |
+
+The longest matching prefix wins. Login belongs to its subsystem, for example
+POST /mad/auth/login. There is no shared /auth or /identity route.
+Optional route mappings are templates until their backend contracts are confirmed.
+
+GET /health/live checks the gateway process. GET /health/ready checks Redis when
+configured and each distinct enabled backend's /health/ready endpoint.
 
 ## Local setup (PowerShell)
 
-Use Node 22.14.x and npm 10+. From this directory:
+Use Node 22.14.x and npm 10+. Run inside this folder:
 
 ```powershell
 if (!(Test-Path .env)) { Copy-Item .env.example .env }
@@ -25,56 +38,21 @@ npm.cmd ci --ignore-scripts
 npm.cmd run dev
 ```
 
-Configure the real `JWT_SECRET`, `JWT_ISSUER`, `AUTH_SERVICE_URL`,
-`MAD_SERVICE_URL`, and `AUTH_API_URL` in `.env`. The example secret is development
-only. The gateway listens at `http://localhost:8080`; MAD remains on 4000 and the
-separate Auth service is expected on 5000 unless configured otherwise.
+Set MAD_SERVICE_URL=http://localhost:4000 and
+ALLOWED_ORIGINS=http://localhost:3000 in .env. Gateway listens on port 8080.
+No service on port 5000 or authentication environment variables are needed.
+When upgrading an existing .env, remove JWT_SECRET, JWT_ISSUER, AUTH_SERVICE_URL,
+AUTH_API_URL and IDENTITY_SERVICE_URL; replace AUTH_TIMEOUT_MS with HEALTH_TIMEOUT_MS.
+Keep the original .env private; the gateway does not migrate it automatically.
 
-For a compiled run:
+Compiled run:
 
 ```powershell
 npm.cmd run build
 npm.cmd start
 ```
 
-Endpoints:
-
-| Path                         | Behavior                                                                                  |
-| ---------------------------- | ----------------------------------------------------------------------------------------- |
-| `GET /health/live`           | Gateway process responds                                                                  |
-| `GET /health/ready`          | Redis connection, when configured, and enabled upstream `/health/ready` endpoints respond |
-| `POST /auth/login`           | Public, rate-limited proxy to MAD `/auth/login`                                           |
-| `GET /auth/session`          | Verified manager JWT/session, allows pending password change, forwards to MAD             |
-| `POST /auth/change-password` | Same pending-change allowance; forwards to MAD                                            |
-| `POST /auth/logout`          | Verified manager JWT; forwards to MAD even if central Auth is unavailable                 |
-| `/mad/*`                     | Active MANAGER session with completed password change; prefix preserved                   |
-
-Routes not enabled in `config/routes.json` return 404. No upstream location is
-taken from a client header, query value or request body.
-
-## Connect the existing manager frontend
-
-Change its **local** `frontend/.env.local` settings to:
-
-```dotenv
-NEXT_PUBLIC_API_URL=http://localhost:8080
-BACKEND_API_URL=http://localhost:8080
-APP_ORIGIN=http://localhost:3000
-```
-
-Restart the frontend. Keep MAD's `AUTH_SERVICE_URL` pointing directly to central
-Auth. Never point it to the gateway `/auth` facade, which would create a loop.
-The gateway's `/auth/*` target must remain MAD for the existing frontend: MAD
-returns the safe session fields expected by its BFF and performs local logout
-revocation. The gateway does not set browser cookies or create login accounts.
-
-These are instructions only: no existing MAD configuration was changed by creating
-this folder. Booking and occupancy data still require the provider reporting views
-documented in the MAD repository.
-
-## Containers
-
-After creating `.env`, run from this directory:
+Local containers:
 
 ```powershell
 docker compose up --build -d
@@ -82,28 +60,51 @@ docker compose logs -f gateway
 docker compose down
 ```
 
-This starts the gateway and a private Redis instance. Local Compose explicitly
-targets host MAD/Auth services using `host.docker.internal`. It does not start MAD,
-Auth, PostgreSQL or any business subsystem. Edit Compose if those services run on
-a shared Docker network instead. The production file is separate and must be used
-with `-f compose.production.yaml`; see the maintenance report before deploying.
+Compose starts the gateway and private Redis. It reaches MAD on the host at port
+4000; it does not start any subsystem or database. Use the separate production
+Compose file only after following [MAINTENANCE.md](MAINTENANCE.md).
 
-## Verification
+## MAD integration still required
+
+The current MAD backend still calls a central Auth provider. That backend must
+be changed separately to implement its own login and token/session validation.
+This gateway change does not implement that backend work.
+
+The current MAD frontend BFF also requests /auth/* from its configured backend.
+To use this gateway, its auth requests must use /mad/auth/* while business requests
+retain /mad/*. Changing only BACKEND_API_URL to port 8080 is insufficient.
+Keep the existing direct connection until that adapter is updated.
+
+This gateway currently forwards API authorization headers, not Cookie or
+Set-Cookie headers. The existing browser-to-BFF HttpOnly session cookie stays in
+the subsystem frontend; its BFF forwards the subsystem's token. A backend using
+cookie-only API sessions needs an explicit cookie/CSRF/proxy design before routing
+through this implementation. Separate subsystem logins do not provide SSO or
+global logout.
+
+## Verification and handoff
+
+Static checks and build:
 
 ```powershell
 npm.cmd run typecheck
 npm.cmd run lint
 npm.cmd run format:check
 npm.cmd run build
+```
+
+Run tests yourself:
+
+```powershell
 npm.cmd test
 npm.cmd run test:cov
 ```
 
-Tests use temporary loopback HTTP providers and generated test JWTs. They do not
-need real Auth, MAD, PostgreSQL or Redis. The production Redis/Caddy deployment
-still needs separate staging acceptance. Tests were provided but not run during
-implementation, respecting the existing user preference.
+The updated tests use temporary local HTTP providers. No tests were run during
+this change. See [TEST_REGISTER.md](TEST_REGISTER.md) for coverage and outstanding
+staging checks.
 
-Read [MAINTENANCE.md](MAINTENANCE.md) for operation, security boundaries, adding
-services, deployment, testing, upgrade and recovery procedures, and outstanding
-cross-service agreements. [TEST_REGISTER.md](TEST_REGISTER.md) maps the tests.
+Copy this folder, including dotfiles and the lockfile, into its own repository.
+Do not copy node_modules, generated output, caches or real environment files.
+This copy is currently ignored by the parent repository's .gitignore.
+Read [MAINTENANCE.md](MAINTENANCE.md) for the full operating guide.

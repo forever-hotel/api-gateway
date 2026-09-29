@@ -4,9 +4,8 @@ import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { Redis } from 'ioredis';
 import { randomUUID } from 'node:crypto';
-import type { Config, Access } from './config.ts';
+import type { Config } from './config.ts';
 import { METHODS } from './config.ts';
-import { authenticate } from './auth.ts';
 import { boundedBody, requestPath } from './http.ts';
 import { GatewayError, forbidden, unavailable } from './errors.ts';
 
@@ -69,13 +68,11 @@ export async function buildApp(config: Config, logging = true) {
             ? error.statusCode
             : 503;
       const [code, message] = messages[status] ?? messages[503];
-      reply
-        .code(status)
-        .send({
-          code: error instanceof GatewayError ? error.code : code,
-          message: error instanceof GatewayError ? error.message : message,
-          requestId: request.id,
-        });
+      reply.code(status).send({
+        code: error instanceof GatewayError ? error.code : code,
+        message: error instanceof GatewayError ? error.message : message,
+        requestId: request.id,
+      });
     },
   );
   app.addHook('onRequest', async (request, reply) => {
@@ -121,7 +118,7 @@ export async function buildApp(config: Config, logging = true) {
       requestId: request.id,
     }),
   });
-  // Run before route-level authentication, including invalid/revoked tokens.
+  // Transport limits apply independently of downstream authentication decisions.
   app.addHook('onRequest', app.rateLimit());
   app.addHook('onResponse', async (request, reply) => {
     // No URLs, queries, headers, usernames, bodies or JWTs enter the access log.
@@ -159,7 +156,7 @@ export async function buildApp(config: Config, logging = true) {
         try {
           const response = await fetch(upstream + '/health/ready', {
             redirect: 'manual',
-            signal: AbortSignal.timeout(config.authTimeout),
+            signal: AbortSignal.timeout(config.healthTimeout),
           });
           await response.body?.cancel();
           return response.ok;
@@ -178,7 +175,7 @@ export async function buildApp(config: Config, logging = true) {
   app.route({
     method: [...METHODS],
     url: '/*',
-    // Authenticate before buffering request bodies or invoking the proxy.
+    // Reject unknown destinations before buffering the body.
     onRequest: async (request) => {
       const { pathname } = requestPath(request.raw.url ?? '/');
       const route = config.routes.find(
@@ -187,29 +184,10 @@ export async function buildApp(config: Config, logging = true) {
           pathname.startsWith(candidate.prefix + '/'),
       );
       if (!route) throw new GatewayError(404, 'NOT_FOUND', messages[404][1]);
-      const suffix = pathname.slice(route.prefix.length);
-      const endpoint = route.endpoints.find(
-        (entry) => entry.path === suffix && entry.method === request.method,
-      );
-      if (route.endpoints.length && !endpoint)
-        throw new GatewayError(404, 'NOT_FOUND', messages[404][1]);
-      const access: Access = endpoint?.access ?? 'protected';
-      const principal =
-        access === 'public'
-          ? undefined
-          : await authenticate(
-              config,
-              request.headers.authorization,
-              route,
-              request.method,
-              access,
-              request.id,
-            );
-      contexts.set(request, { route, principal });
+      contexts.set(request, route);
     },
     handler: async (request, reply) => {
-      const context = contexts.get(request)!;
-      const { route, principal } = context;
+      const route = contexts.get(request)!;
       const { pathname, search } = requestPath(request.raw.url ?? '/');
       const target =
         route.upstream +
@@ -224,19 +202,15 @@ export async function buildApp(config: Config, logging = true) {
         'if-match',
         'if-none-match',
         'stripe-signature',
+        'authorization',
       ]) {
         const value = request.headers[name];
         if (typeof value === 'string') headers.set(name, value);
       }
       headers.set('x-request-id', request.id);
       headers.set('x-forwarded-for', request.ip);
-      if (principal) {
-        headers.set('authorization', request.headers.authorization!);
-        headers.set('x-user-id', principal.sub);
-        headers.set('x-user-role', principal.role);
-        if (principal.roomNumber)
-          headers.set('x-room-number', principal.roomNumber);
-      }
+      // Authorization is opaque: only the destination service may validate it.
+      // Client-supplied identity headers and cookies are never trusted/forwarded.
       let response: Response;
       let body: Buffer;
       const signal = AbortSignal.timeout(config.upstreamTimeout);
@@ -271,32 +245,17 @@ export async function buildApp(config: Config, logging = true) {
         response.status !== 304
       )
         throw new GatewayError(502, 'BAD_GATEWAY', messages[502][1]);
-      if (response.status >= 400) {
-        const status = response.status >= 500 ? 503 : response.status;
-        let [code, message] = messages[status] ?? [
-          'REQUEST_REJECTED',
-          'The upstream service rejected the request.',
-        ];
-        // Preserve the one client-actionable domain code without forwarding internals.
-        try {
-          if (
-            status === 403 &&
-            JSON.parse(body.toString()).code === 'PASSWORD_CHANGE_REQUIRED'
-          ) {
-            code = 'PASSWORD_CHANGE_REQUIRED';
-            message = 'Change your password before accessing this service.';
-          }
-        } catch {
-          /* Untrusted upstream body stays private. */
-        }
-        const retry = response.headers.get('retry-after');
-        if (status === 429 && retry && /^\d{1,6}$/.test(retry))
-          reply.header('retry-after', retry);
-        return reply
-          .code(status)
-          .send({ code, message, requestId: request.id });
-      }
-      for (const name of ['content-type', 'etag', 'content-disposition']) {
+      if (response.status >= 500) throw unavailable();
+      const retry = response.headers.get('retry-after');
+      if (response.status === 429 && retry && /^\d{1,6}$/.test(retry))
+        reply.header('retry-after', retry);
+      // Preserve subsystem login/session/validation errors, including 401/403.
+      for (const name of [
+        'content-type',
+        'etag',
+        'content-disposition',
+        'www-authenticate',
+      ]) {
         const value = response.headers.get(name);
         if (value) reply.header(name, value);
       }
@@ -311,15 +270,13 @@ export async function buildApp(config: Config, logging = true) {
     },
   });
   app.setNotFoundHandler((request, reply) =>
-    reply
-      .code(404)
-      .send({
-        code: 'NOT_FOUND',
-        message: messages[404][1],
-        requestId: request.id,
-      }),
+    reply.code(404).send({
+      code: 'NOT_FOUND',
+      message: messages[404][1],
+      requestId: request.id,
+    }),
   );
-  // No WebSocket or CONNECT tunnelling without an agreed realtime auth contract.
+  // This finite-response REST proxy does not implement WebSocket/CONNECT tunnels.
   app.server.on('upgrade', (_request, socket) =>
     socket.end('HTTP/1.1 501 Not Implemented\r\nConnection: close\r\n\r\n'),
   );
@@ -331,8 +288,4 @@ export async function buildApp(config: Config, logging = true) {
 
 import type { FastifyRequest } from 'fastify';
 import type { Route } from './config.ts';
-import type { Principal } from './auth.ts';
-const contexts = new WeakMap<
-  FastifyRequest,
-  { route: Route; principal?: Principal }
->();
+const contexts = new WeakMap<FastifyRequest, Route>();
