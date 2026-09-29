@@ -21,11 +21,11 @@ async function main() {
   await app.listen({ host: config.host, port: config.port });
 }
 main().catch((error: unknown) => {
-  // Startup exceptions can contain upstream URLs or Redis credentials.
+  // Startup exceptions can contain private upstream URLs.
   console.error(
     error instanceof Error && error.message.startsWith('Configuration:')
       ? error.message
-      : 'Gateway startup failed. Check configuration, port availability and rate-limit store.',
+      : 'Gateway startup failed. Check configuration and port availability.',
   );
   process.exitCode = 1;
 });

@@ -2,11 +2,11 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
-import { Redis } from 'ioredis';
 import { randomUUID } from 'node:crypto';
 import type { Config } from './config.ts';
 import { METHODS } from './config.ts';
 import { boundedBody, requestPath } from './http.ts';
+import { requestCookies, responseCookies } from './cookies.ts';
 import { GatewayError, forbidden, unavailable } from './errors.ts';
 
 const messages: Record<number, [string, string]> = {
@@ -40,25 +40,6 @@ export async function buildApp(config: Config, logging = true) {
     keepAliveTimeout: 5000,
     forceCloseConnections: 'idle',
   });
-  let redis: Redis | undefined;
-  if (config.redisUrl) {
-    redis = new Redis(config.redisUrl, {
-      lazyConnect: true,
-      connectTimeout: 2000,
-      maxRetriesPerRequest: 1,
-      enableOfflineQueue: false,
-    });
-    redis.on('error', () => app.log.warn({ event: 'rate_store_unavailable' }));
-    try {
-      await redis.connect();
-    } catch {
-      redis.disconnect();
-      throw new Error('Rate-limit store unavailable');
-    }
-    app.addHook('onClose', async () => {
-      redis?.disconnect();
-    });
-  }
   app.setErrorHandler(
     (error: Error & { statusCode?: number; code?: string }, request, reply) => {
       const status =
@@ -89,7 +70,7 @@ export async function buildApp(config: Config, logging = true) {
   await app.register(helmet, { contentSecurityPolicy: false });
   await app.register(cors, {
     origin: config.origins,
-    credentials: false,
+    credentials: true,
     methods: [...METHODS],
     allowedHeaders: [
       'Authorization',
@@ -97,6 +78,7 @@ export async function buildApp(config: Config, logging = true) {
       'Idempotency-Key',
       'If-Match',
       'If-None-Match',
+      'X-CSRF-Token',
     ],
     exposedHeaders: ['X-Request-Id', 'Retry-After'],
     maxAge: 600,
@@ -108,9 +90,7 @@ export async function buildApp(config: Config, logging = true) {
         ? config.loginMax
         : config.rateMax,
     timeWindow: config.windowMs,
-    redis,
     skipOnError: false,
-    nameSpace: 'forever-gateway:',
     errorResponseBuilder: (request) => ({
       statusCode: 429,
       code: 'RATE_LIMITED',
@@ -147,7 +127,6 @@ export async function buildApp(config: Config, logging = true) {
     service: 'forever-hotel-api-gateway',
   }));
   app.get('/health/ready', async () => {
-    if (redis && redis.status !== 'ready') throw unavailable();
     const upstreams = [
       ...new Set(config.routes.map((route) => route.upstream)),
     ];
@@ -184,6 +163,14 @@ export async function buildApp(config: Config, logging = true) {
           pathname.startsWith(candidate.prefix + '/'),
       );
       if (!route) throw new GatewayError(404, 'NOT_FOUND', messages[404][1]);
+      // Browsers attach cookies automatically. Cookie-authenticated writes must
+      // identify an approved origin; the subsystem still validates CSRF tokens.
+      if (
+        !['GET', 'HEAD'].includes(request.method) &&
+        requestCookies(request.headers.cookie, route) &&
+        !request.headers.origin
+      )
+        throw forbidden();
       contexts.set(request, route);
     },
     handler: async (request, reply) => {
@@ -203,14 +190,18 @@ export async function buildApp(config: Config, logging = true) {
         'if-none-match',
         'stripe-signature',
         'authorization',
+        'origin',
+        'x-csrf-token',
       ]) {
         const value = request.headers[name];
         if (typeof value === 'string') headers.set(name, value);
       }
       headers.set('x-request-id', request.id);
       headers.set('x-forwarded-for', request.ip);
+      const cookie = requestCookies(request.headers.cookie, route);
+      if (cookie) headers.set('cookie', cookie);
       // Authorization is opaque: only the destination service may validate it.
-      // Client-supplied identity headers and cookies are never trusted/forwarded.
+      // Cookies are opaque and restricted to this subsystem's configured names.
       let response: Response;
       let body: Buffer;
       const signal = AbortSignal.timeout(config.upstreamTimeout);
@@ -246,6 +237,12 @@ export async function buildApp(config: Config, logging = true) {
       )
         throw new GatewayError(502, 'BAD_GATEWAY', messages[502][1]);
       if (response.status >= 500) throw unavailable();
+      const cookies = responseCookies(
+        response.headers.getSetCookie(),
+        route,
+        config.production,
+      );
+      if (cookies.length) reply.header('set-cookie', cookies);
       const retry = response.headers.get('retry-after');
       if (response.status === 429 && retry && /^\d{1,6}$/.test(retry))
         reply.header('retry-after', retry);

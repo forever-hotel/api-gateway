@@ -7,35 +7,15 @@ services:
       HOST: 0.0.0.0
       PORT: 8080
       MAD_SERVICE_URL: http://host.docker.internal:4000
-      REDIS_URL: redis://redis:6379
+      HW_SERVICE_URL: http://host.docker.internal:4100
+      FDS_SERVICE_URL: http://host.docker.internal:4200
+      FOSS_SERVICE_URL: http://host.docker.internal:4300
+      KMS_SERVICE_URL: http://host.docker.internal:4500
+      WKMS_SERVICE_URL: http://host.docker.internal:4600
     ports: ['127.0.0.1:8080:8080']
     extra_hosts: ['host.docker.internal:host-gateway']
-    depends_on:
-      redis:
-        condition: service_healthy
     read_only: true
     security_opt: ['no-new-privileges:true']
     cap_drop: [ALL]
     init: true
-    restart: unless-stopped
-  redis:
-    image: redis:7-alpine
-    command:
-      [
-        'redis-server',
-        '--save',
-        '',
-        '--appendonly',
-        'no',
-        '--maxmemory',
-        '64mb',
-        '--maxmemory-policy',
-        'noeviction',
-      ]
-    healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    security_opt: ['no-new-privileges:true']
     restart: unless-stopped

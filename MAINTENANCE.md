@@ -1,262 +1,334 @@
-# Gateway maintenance report
+# Shared gateway integration and maintenance
 
-## Architecture and ownership
+## Architecture and requirements
 
-This implementation follows the decision to give all six subsystems their own
-login mechanisms. It supersedes the earlier gateway JWT/central-Auth design.
-MAD, HW, FDS, FOSS, KMS and WKMS each own credential verification, token issuance,
-token/session validation, password policy, roles, authorization and revocation.
+This guide is for the owners of MAD, HW, FDS, FOSS, KMS and WKMS and the team
+operating the shared gateway. The gateway is a standalone TypeScript/Fastify
+application, independent of the frameworks used by subsystem backends.
+Each backend owns credential verification,
+session/token issuance and validation, permissions, password policy and logout.
+The gateway has no users, JWT keys, central Auth service or business database.
+Authorization and configured cookies are opaque transport data.
 
-The gateway has no user database, signing keys, roles or central Auth dependency.
-It forwards Authorization as an opaque header. Missing or malformed credentials
-also reach the backend, which must reject them where authentication is required.
-A successful gateway route match conveys no permission.
+There is no Redis service or response cache. Rate counters are local to the gateway
+process and responses remain no-store. Any frontend offline cache belongs to its
+subsystem.
 
-Each service must validate its own tokens and scope access to its own data.
-Do not make unrelated services accept a token merely because it arrived through
-the gateway. Cross-service access, shared identities, SSO and global logout require
-separate contracts and are not implemented here.
+The current integration contract uses independent subsystem login with cookie or
+Authorization transport. Existing backends and frontends must be adapted by their
+owners if they still depend on another authentication architecture. Enabling a
+gateway route does not complete those changes.
 
-The current MAD backend still depends on central Auth. Implementing local MAD
-authentication and adapting its frontend BFF are subsequent tasks. The gateway
-can route its endpoints now, but cannot replace that missing backend behavior.
+| Owner | Responsibilities |
+| --- | --- |
+| Gateway team | Route destinations, cookie allowlists, CORS, limits, TLS and operational logs |
+| Each backend team | Login, credential storage, session/token validation, roles, CSRF, logout and readiness |
+| Each frontend/BFF team | Subsystem API paths, credentials, CSRF transport and session UI |
 
-## Repository layout and transfer
+## Repository and ownership
 
-| Path                     | Purpose                                            |
-| ------------------------ | -------------------------------------------------- |
-| src/config.ts            | Validate environment and route destinations        |
-| src/app.ts               | Forward requests, limits, CORS, health and logging |
-| src/http.ts              | Canonical paths and bounded response reader        |
-| src/errors.ts            | Transport errors                                   |
-| src/server.ts            | Startup and graceful shutdown                      |
-| config/routes.json       | Static prefix mappings                             |
-| test/gateway.test.ts     | Isolated provider tests                            |
-| compose.yaml             | Local gateway and Redis                            |
-| compose.production.yaml  | Production gateway, Redis and Caddy edge           |
-| deploy/Caddyfile         | HTTPS and forwarding headers                       |
-| .github/workflows/ci.yml | CI when this folder becomes a repository root      |
+| Path | Purpose |
+| --- | --- |
+| src/config.ts | Environment, prefix and cookie-name validation |
+| src/app.ts | Forwarding, limits, CORS, health, logs |
+| src/cookies.ts | Subsystem cookie filtering and response scope |
+| src/http.ts | Canonical paths and bounded responses |
+| src/errors.ts | Safe transport errors |
+| src/server.ts | Startup and graceful shutdown |
+| config/routes.json | Enabled routes and cookie names |
+| test/gateway.test.ts | Isolated provider tests |
+| compose.yaml | Local gateway only |
+| compose.production.yaml | Gateway and Caddy HTTPS edge |
+| deploy/Caddyfile | TLS and trusted forwarding headers |
+| .github/workflows/ci.yml | CI after transfer to its own repository |
 
-Copy the complete folder including dotfiles, package-lock.json and route
-configuration into the separate repository. Exclude node_modules, .npm-cache,
-dist, .test-build, coverage, logs and actual .env files. Keep secrets separately.
-Do not copy the parent repository's .git directory.
-
-The parent .gitignore currently ignores api-gateway. Changes here are local
-until you copy them into the gateway repository and commit them there.
-The nested GitHub workflow also only becomes active in that repository.
-
-From its new root, install with npm ci --ignore-scripts. Run typecheck, lint,
-format:check and build, then the tests yourself before a release. Commit source
-and lockfile together using the destination repository's commit rules.
+Copy the folder with dotfiles and lockfile. Exclude node_modules, .npm-cache, dist,
+.test-build, coverage, logs and actual environment files. Do not copy the parent
+repository's .git directory. The parent .gitignore currently ignores api-gateway;
+the nested CI workflow becomes active only when copied to a repository root.
 
 ## Configuration
 
-Configuration loads once at startup. Restart after modifying environment variables
-or routes. The .env.example file contains the current template.
+Configuration loads once at startup. Restart after environment or route changes.
 
-| Variable             | Default/example       | Purpose                                       |
-| -------------------- | --------------------- | --------------------------------------------- |
-| NODE_ENV             | development           | Production requires HTTPS origins and Redis   |
-| HOST / PORT          | 127.0.0.1 / 8080      | Listener; containers override HOST to 0.0.0.0 |
-| LOG_LEVEL            | info                  | fatal, error, warn, info, debug or silent     |
-| MAD_SERVICE_URL      | http://localhost:4000 | MAD backend origin                            |
-| HW_SERVICE_URL       | http://localhost:4100 | Required only when HW is enabled              |
-| FDS_SERVICE_URL      | http://localhost:4200 | Required only when FDS is enabled             |
-| FOSS_SERVICE_URL     | http://localhost:4300 | Required only when FOSS is enabled            |
-| KMS_SERVICE_URL      | http://localhost:4500 | Required only when KMS is enabled             |
-| WKMS_SERVICE_URL     | http://localhost:4600 | Required only when WKMS is enabled            |
-| ALLOWED_ORIGINS      | http://localhost:3000 | Comma-separated exact browser origins         |
-| TRUSTED_PROXIES      | Empty                 | Trusted immediate proxy IPs/CIDRs             |
-| REDIS_URL            | Empty locally         | Shared rate counters; required in production  |
-| RATE_LIMIT_MAX       | 120                   | Requests per client-IP window                 |
-| LOGIN_RATE_LIMIT_MAX | 10                    | Threshold for paths ending /login             |
-| RATE_LIMIT_WINDOW_MS | 60000                 | IP quota window                               |
-| BODY_LIMIT_BYTES     | 1048576               | Buffered request limit                        |
-| RESPONSE_LIMIT_BYTES | 10485760              | Buffered response limit                       |
-| UPSTREAM_TIMEOUT_MS  | 4000                  | Backend request plus body-reading deadline    |
-| HEALTH_TIMEOUT_MS    | 2000                  | Deadline for each readiness probe             |
-| ROUTES_FILE          | config/routes.json    | Route file relative to working directory      |
+| Variable | Default/example | Purpose |
+| --- | --- | --- |
+| NODE_ENV | development | Production requires HTTPS frontend origins |
+| HOST / PORT | 127.0.0.1 / 8080 | Containers override host to 0.0.0.0 |
+| LOG_LEVEL | info | fatal, error, warn, info, debug, silent |
+| MAD_SERVICE_URL | http://localhost:4000 | MAD origin |
+| HW_SERVICE_URL | http://localhost:4100 | HW origin |
+| FDS_SERVICE_URL | http://localhost:4200 | FDS origin |
+| FOSS_SERVICE_URL | http://localhost:4300 | FOSS origin |
+| KMS_SERVICE_URL | http://localhost:4500 | KMS origin |
+| WKMS_SERVICE_URL | http://localhost:4600 | WKMS origin |
+| ALLOWED_ORIGINS | localhost ports 3000–3005 | Exact frontend origins; sample ports only |
+| TRUSTED_PROXIES | Empty | Trusted immediate proxy IPs/CIDRs |
+| RATE_LIMIT_MAX | 120 | Per-process client-IP request threshold |
+| LOGIN_RATE_LIMIT_MAX | 10 | Lower threshold for paths ending /login |
+| RATE_LIMIT_WINDOW_MS | 60000 | Rate window |
+| BODY_LIMIT_BYTES | 1048576 | Buffered request limit |
+| RESPONSE_LIMIT_BYTES | 10485760 | Buffered response limit |
+| UPSTREAM_TIMEOUT_MS | 4000 | Request and response-reading deadline |
+| HEALTH_TIMEOUT_MS | 2000 | Each backend readiness deadline |
+| ROUTES_FILE | config/routes.json | Relative to gateway working directory |
 
-Origins must be HTTP(S) without credentials, paths, queries or fragments. Use
-rewritePrefix for path changes. Disabled routes do not require their service URL.
-Never dump runtime environment or expanded Compose configuration into public logs.
+All six routes are enabled, so all service URLs are required. Origins must be
+HTTP(S), with no credentials, path, query or fragment. Existing .env files are
+not modified automatically: copy new values from .env.example and remove
+REDIS_URL and obsolete central-Auth/JWT variables.
 
-Remove obsolete JWT_SECRET, JWT_ISSUER, AUTH_SERVICE_URL, AUTH_API_URL and
-IDENTITY_SERVICE_URL from the gateway's private deployment configuration.
-Replace AUTH_TIMEOUT_MS with HEALTH_TIMEOUT_MS. Gateway deployments no longer
-need access to any subsystem's JWT keys.
+Do not publish actual environment files or expanded Compose configuration.
+There are no Redis deployment credentials or JWT signing keys to configure.
 
-## Routing contract
+## Routing and service onboarding
 
-Each route has exactly id, enabled, prefix, rewritePrefix and upstreamEnv.
-Obsolete roles, readOnlyRoles and endpoints fields fail configuration validation
-instead of silently suggesting enforcement that no longer exists.
+Each route has id, enabled, prefix, rewritePrefix, upstreamEnv and optional
+cookieNames (defaults to an empty array, meaning no cookie forwarding).
+Obsolete roles, endpoints and readOnlyRoles are rejected.
 
-A prefix matches itself or prefix followed by a slash. /madness does not match
-/mad. More specific prefixes take precedence regardless of file order:
-/mad/auth/session maps to MAD /auth/session, while /mad/analytics/bookings
-maps to MAD /mad/analytics/bookings. Duplicate enabled prefixes/IDs are rejected.
-Health prefixes are reserved for the gateway.
+A prefix matches itself or its slash-delimited descendants. The longest match
+wins. General routes preserve `/<subsystem>/*`. The current configuration also
+has a more specific `/mad/auth/*` to `/auth/*` mapping for that backend's path
+layout; other teams can use the same pattern when needed.
 
-Query strings retain their encoding. Encoded paths, double slashes, backslashes
-and dot segments are rejected. Use canonical URL-safe resource identifiers.
-Destinations come only from configured origins, never from caller input.
+Use these templates for a backend whose business paths include its prefix and
+whose authentication paths start at `/auth`. Replace every placeholder before
+adding entries to JSON; edit existing routes rather than duplicating them:
 
-All supported API methods under an enabled prefix reach the backend. There is no
-endpoint or role allowlist in the gateway. Avoid exposing internal-only backend
-administration endpoints under a public mapped prefix.
+```json
+[
+  {
+    "id": "<subsystem>-auth",
+    "enabled": true,
+    "prefix": "/<subsystem>/auth",
+    "rewritePrefix": "/auth",
+    "upstreamEnv": "<SUBSYSTEM>_SERVICE_URL",
+    "cookieNames": ["<subsystem>_session", "<subsystem>_csrf"]
+  },
+  {
+    "id": "<subsystem>",
+    "enabled": true,
+    "prefix": "/<subsystem>",
+    "rewritePrefix": "/<subsystem>",
+    "upstreamEnv": "<SUBSYSTEM>_SERVICE_URL",
+    "cookieNames": ["<subsystem>_session", "<subsystem>_csrf"]
+  }
+]
+```
 
-The proxy buffers finite responses. It supports GET, HEAD, POST, PUT, PATCH and
-DELETE; CORS handles OPTIONS preflights. WebSocket, CONNECT, SSE/streaming and
-frontend page hosting are outside this implementation. Upstream redirects are
-rejected except 304, and requests are never automatically retried.
+Use lowercase `mad`, `hw`, `fds`, `foss`, `kms` or `wkms` for
+`<subsystem>`, and its uppercase form for `<SUBSYSTEM>`. If authentication
+already uses `/<subsystem>/auth` internally, the general route is enough.
+Keep all routes for one subsystem below the same first path segment and
+use consistent cookie allowlists for its login and business routes.
 
-Subsystem 4xx statuses and bodies pass through, including 401, 403 and
-PASSWORD_CHANGE_REQUIRED. WWW-Authenticate is forwarded. Backend 5xx responses
-become a safe 503; oversized responses and redirects become 502; timeouts become 504. The gateway always sends Cache-Control: no-store.
+All supported methods under an enabled prefix reach the backend. Authentication,
+role checks and internal endpoint protection belong to that backend. Query strings
+are preserved; ambiguous/encoded paths, dot segments, backslashes and double
+slashes are rejected. Destinations never come from caller-supplied URLs.
 
-## Authentication transport and browser integration
+The finite-response proxy supports GET, HEAD, POST, PUT, PATCH and DELETE.
+CORS handles OPTIONS. WebSocket, CONNECT, SSE and file streaming are unsupported.
+Redirects other than 304 are rejected; writes are never automatically retried.
 
-Authorization, Content-Type, Accept, Idempotency-Key, If-Match, If-None-Match and
-Stripe-Signature are allowed upstream headers. Raw request bytes are retained for
-signature verification. The gateway neither reads JWT claims nor generates
-X-User-Id, X-User-Role or X-Room-Number. Client-supplied identity headers are stripped.
-A new X-Request-Id and a trusted client address are generated for each request.
+Every subsystem team should supply the following integration details:
 
-Cookie and Set-Cookie are not forwarded. CORS credentials are disabled. This
-supports the existing pattern where each frontend BFF owns its browser session
-cookie and forwards an API bearer token. Cookie-only backend sessions, custom
-API-key headers, OAuth browser redirects and direct cross-origin cookie login
-need deliberate transport changes and their own verification before enabling.
+| Contract item | Information to provide |
+| --- | --- |
+| Destination | Local and production backend origins and service owner |
+| Routes | Public gateway prefix and actual backend authentication/business paths |
+| Health | Implementation of `GET /health/ready` and its dependency checks |
+| Login/session | Credential fields, response schema, session validation and expiry behavior |
+| Authorization | Public operations and backend-enforced roles/object permissions |
+| Cookies | Names, HttpOnly/SameSite settings, expiry and logout deletion |
+| CSRF | Token acquisition, write validation and allowed frontend origins |
+| Frontend/BFF | Direct browser or server-side API calls and credential forwarding |
 
-The MAD frontend currently calls backend /auth/* and /mad/_. Its gateway adapter
-must send auth requests to /mad/auth/_ and business requests to /mad/*.
-Changing only its backend URL cannot do that prefix split.
-Also complete MAD's local login implementation before claiming login works.
+All services are enabled in the supplied route file, but must be provided and
+run independently. Confirm these contracts before connecting production traffic.
 
-Backend services must sanitize their own 4xx responses because those bodies are
-preserved. Password checks, account lockouts, token expiry, object-level permissions
-and logout invalidation remain backend responsibilities.
+## Cookie contract
 
-## Add or enable a subsystem
+Default cookie allowlists:
 
-1. Obtain its origin, API prefix, login/session contract and /health/ready endpoint.
-2. Verify its backend authenticates private requests and enforces permissions.
-3. Set its *_SERVICE_URL and enable its entry in config/routes.json.
-4. Confirm rewritePrefix matches its actual backend paths. If FDS exposes /auth/*
-   rather than /fds/auth/*, add a more specific /fds/auth mapping with rewritePrefix
-   /auth, using FDS_SERVICE_URL. Keep the general /fds mapping.
-5. Confirm header/cookie needs fit the transport contract above.
-6. Add provider cases for routing and forwarded authentication errors. Run them
-   yourself, then verify real login, invalid tokens, authorization and logout in staging.
-7. Deploy the backend first, then the gateway route configuration/image.
+| Subsystem | Names | Public cookie path |
+| --- | --- | --- |
+| MAD | mad_session, mad_csrf | /mad |
+| HW | hw_session, hw_csrf | /hw |
+| FDS | fds_session, fds_csrf | /fds |
+| FOSS | foss_session, foss_csrf | /foss |
+| KMS | kms_session, kms_csrf | /kms |
+| WKMS | wkms_session, wkms_csrf | /wkms |
 
-An unavailable enabled service makes aggregate readiness fail. Enable only services
-that are ready for the current environment. Disabling a route stops new matching
-requests but does not revoke that subsystem's existing sessions.
+Backend owners should use these names or change cookieNames to their actual names.
+An unlisted cookie is not forwarded in either direction. Names cannot overlap
+between different subsystem path roots. Names are not renamed and values are not
+decoded, validated, logged or stored by the gateway.
 
-## Local and production operation
+Request Cookie is filtered to the destination route's allowlist. Spoofed X-User-Id,
+X-User-Role and X-Room-Number are still stripped; the backend obtains identity by
+validating its own token/session.
 
-Local node: copy .env.example to .env if absent, install dependencies and run
-npm run dev. MAD normally listens on 4000; the gateway listens on 8080.
-Local Compose starts Redis and reaches host MAD through host.docker.internal.
-Other host service URLs also need container-reachable names when enabled.
+Each allowed Set-Cookie response is forwarded separately, including on 4xx and
+204 responses. Domain is removed so the browser stores it on the public gateway
+host. Path is normalized to `/<subsystem>`, including for logout. Login cookies
+therefore cover both authentication and business requests for the same subsystem.
 
-Production uses compose.production.yaml as a standalone file. Create a private
-.env.production with HTTPS ALLOWED_ORIGINS, real internal service URLs,
+This intentionally standardizes all a subsystem's configured cookies to its
+subsystem root; it does not preserve narrower upstream Path values. Session
+cookies should be HttpOnly, and the backend chooses that flag. Secure is preserved
+and added in production. SameSite is preserved or defaults to Lax. Expires,
+Max-Age and deletion values are preserved. Backend 5xx responses are sanitized
+before cookie forwarding, so logout should clear cookies with a successful or
+appropriate 4xx response.
+
+__Host-* cookie names cannot use a subsystem path because browsers require Path=/;
+configuration rejects them. If using __Secure-* names, the backend must issue
+Secure cookies even during development and use HTTPS.
+
+Browser cookie Path is not a full security boundary. All approved frontends are
+trusted applications on this shared gateway origin. The allowlists prevent
+accidental cross-service cookie forwarding; they do not isolate compromised
+same-origin applications. Strong browser isolation requires separate origins.
+
+## Browser credentials and CSRF
+
+Use fetch with credentials: 'include' for both login and authenticated calls.
+The browser stores Set-Cookie and supplies Cookie; JavaScript cannot set those
+headers directly. Credentialed CORS responds only to exact ALLOWED_ORIGINS;
+wildcard origins are not supported.
+
+Every supplied Origin must be allowed. POST/PUT/PATCH/DELETE carrying an allowed
+subsystem cookie also require Origin; missing or null origins are rejected.
+Server-side BFF calls using cookies must pass a verified frontend Origin.
+Bearer-only calls can still omit Origin.
+
+X-CSRF-Token is allowed in preflight and forwarded, along with Origin.
+Subystems must implement and validate their CSRF-token contract and avoid
+state changes on GET/HEAD. Login CSRF and cookie issuance remain part of each
+subsystem's authentication design. CORS alone is not authentication or complete
+CSRF protection.
+
+For frontends and APIs on the same site, SameSite=Lax normally fits this setup.
+Truly cross-site deployments need SameSite=None; Secure; browser third-party-cookie
+policies may still block them. Prefer same-site HTTPS hosts. Frontend JavaScript
+cannot read an HttpOnly session cookie or the Set-Cookie response header.
+A CSRF token can be supplied by a backend JSON endpoint for the frontend to return.
+
+For every frontend, configure a gateway origin and a subsystem prefix. Keep the
+backend's endpoint and payload definitions in the subsystem's own API contract.
+The gateway provides no universal username/password payload or session response.
+
+For a BFF, choose the integration pattern that matches that subsystem:
+
+| Pattern | Frontend/BFF responsibilities |
+| --- | --- |
+| Browser calls gateway directly | Use `credentials: 'include'` for cookies or send Authorization; use the subsystem prefix and approved Origin |
+| BFF owns browser session | Keep its cookie at the frontend and forward the subsystem's API token in Authorization |
+| BFF relays backend cookies | Forward only that subsystem's cookies, a verified Origin for writes and CSRF headers; relay each Set-Cookie separately |
+
+If a BFF relays cookies, account for the browser-visible hostname and path as
+well as the gateway path. For example, a frontend proxy at `/api/*` cannot
+blindly relay `Path=/<subsystem>` cookies and expect the browser to return
+them to `/api/*`. Its cookie scope and CSRF handling must match its public
+routes. This adaptation belongs to the BFF, independently for each subsystem.
+
+Do not forward every cookie received by a frontend server. Cookie-based writes
+must carry the user's verified allowed Origin; a BFF should not manufacture
+an approved Origin for requests from untrusted callers.
+
+Cookie reference: [MDN Set-Cookie](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie).
+CSRF reference: [OWASP prevention guidance](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html).
+
+## Rate limits and deployment
+
+Rate counters now live in each gateway process. They reset on restart and are not
+shared between replicas. Login and other requests share an IP counter with the
+lower threshold applied to login URLs. Health checks also consume the IP quota.
+Account-specific abuse protection stays in each backend. If scaling to multiple
+gateway processes, design a separate global throttling policy before treating
+these counters as a cluster-wide limit.
+
+Local Compose runs only the gateway and reaches all six host backends using
+host.docker.internal. Edit its environment overrides if ports differ or the
+backends run on a Docker network. No subsystem is started by this Compose file.
+
+Production uses compose.production.yaml as a standalone file, with
+.env.production containing HTTPS origins, all internal service origins,
 GATEWAY_DOMAIN, ACME_EMAIL and an immutable GATEWAY_IMAGE tag/digest.
 
 ```powershell
 docker network create forever-hotel-internal
-# Attach each service to that external network with a unique network alias.
+# Attach all six backends to this network with distinct aliases.
 docker build -t your-registry/forever-gateway:0.1.0 .
 docker push your-registry/forever-gateway:0.1.0
 docker compose --env-file .env.production -f compose.production.yaml up -d
 ```
 
-Use internal origins such as http://mad-backend:4000. Caddy exposes ports 80/443;
-gateway 8080, Redis and subsystem ports should stay private. Configure DNS for
-GATEWAY_DOMAIN and retain Caddy certificate volumes. Pin accepted container digests
-in production rather than relying indefinitely on floating major-version tags.
+Caddy exposes 80/443; gateway 8080 and subsystem ports stay private.
+Preserve Caddy certificate volumes. The template trusts only Caddy's
+172.30.80.2/32 address; change its address and TRUSTED_PROXIES together if needed.
+Do not trust arbitrary caller X-Forwarded-For. A BFF may aggregate users into one
+visible IP, so tune quotas or establish trusted address forwarding.
 
-The production template trusts only Caddy at 172.30.80.2/32. If changing the subnet,
-change the IP and trust setting together. Caddy derives the forwarded address from
-its immediate TCP peer. An additional upstream load balancer needs its own reviewed
-trusted-proxy configuration. Do not trust arbitrary caller X-Forwarded-For.
+When upgrading an existing deployment that ran Redis, inspect the old Compose
+service/container and retire only that gateway-owned Redis container after
+confirming no other application uses it. Source changes do not delete running
+containers, volumes or unrelated Redis deployments automatically.
 
-A frontend BFF may cause many users to share one visible client IP. The current MAD
-BFF does not forward a verified client IP. Tune quotas for this topology or implement
-a trusted forwarding contract; do not simply trust all proxies.
+Align Caddy request limits with gateway limits and coordinate timeout budgets.
+Pin reviewed container image digests. SIGINT/SIGTERM allow graceful close with
+a ten-second forced deadline; the production example grants fifteen seconds.
 
-Production requires Redis for shared counters. Redis failures do not bypass rate
-limits. The supplied private Redis has no persistence and refuses new writes at its
-memory ceiling. Restarts reset counters; monitor memory and connectivity. Remote
-Redis should use suitable access controls, credentials and TLS.
+## Monitoring and recovery
 
-Login and other requests share an IP counter, with a lower threshold for /login.
-Health checks also consume the quota. Account-specific login throttling remains in
-each subsystem. Align Caddy's body limit and gateway limits. Coordinate timeout
-budgets with BFF callers and backends; there is no extra central session roundtrip.
+/health/live reports process availability. /health/ready probes each distinct
+enabled upstream. With all six enabled, an absent backend makes readiness return
+503. This is expected until all backends are running; successful routes remain
+independently callable. Probes do not prove login correctness.
 
-## Monitoring and troubleshooting
+Access logs include request ID, route ID, method, status and duration.
+They omit URLs, query strings, headers, cookies and bodies. Correlate the generated
+X-Request-Id with subsystem logs; business audit trails remain upstream.
 
-Use /health/live for process status and /health/ready for enabled backends and
-Redis connection status. Readiness is not a full login or database acceptance test;
-each backend owns what its readiness endpoint checks.
+| Symptom | Check |
+| --- | --- |
+| Startup error | Missing service URL, invalid origin, cookie-name overlap, route schema |
+| 401 | Backend session/token validation |
+| 403 | Unapproved/missing Origin for cookie writes, backend CSRF or permissions |
+| Cookie missing | credentials: include, cookieNames, Domain/Path, SameSite/Secure, browser policy |
+| 404 | Prefix or backend path mismatch |
+| 413 | Gateway/Caddy body limit |
+| 429 | Local process IP quota, BFF/NAT traffic |
+| 502 | Redirect or oversized response |
+| 503 | Backend unavailable/5xx or failed readiness |
+| 504 | Backend timeout |
 
-Access logs contain request ID, route ID, HTTP method, status and duration.
-They omit raw URL/query, headers, bodies, credentials and tokens. Correlate the
-generated X-Request-Id with backend logs. Business audit trails belong to each
-subsystem. Set retention and alerting in your deployment platform.
+Alert on sustained errors, latency, quota pressure and TLS renewal failures.
+There is no Redis health dependency or gateway session store to recover.
+Authentication incidents are handled by the relevant subsystem through session
+revocation and key rotation.
 
-| Symptom                     | Check                                                                |
-| --------------------------- | -------------------------------------------------------------------- |
-| Startup configuration error | Named variable, old route policy fields, duplicate prefixes          |
-| 401                         | Destination backend's login/session/token validation                 |
-| 403                         | CORS origin or destination backend's permissions                     |
-| 404                         | Disabled/unknown prefix, old root /auth path, backend route mismatch |
-| 413                         | Gateway or Caddy request limit                                       |
-| 429                         | Shared IP quota, NAT/BFF traffic, Retry-After                        |
-| 502                         | Backend redirect or oversized response                               |
-| 503                         | Backend 5xx/unreachable service, Redis or readiness failure          |
-| 504                         | Backend request exceeded timeout                                     |
+## Maintenance and acceptance
 
-Alert on sustained 5xx/429, readiness failures, approaching deadlines, Redis
-capacity and certificate renewal failures. Choose thresholds from staging traffic.
-An authentication incident is handled in the affected subsystem: rotate its keys,
-revoke its sessions and investigate its audit trail. Gateway key rotation is no
-longer required because it has no JWT keys.
+Version routes, source, lockfile, configuration and image together. After changes,
+run typecheck, lint, format:check, build and tests before release. Tests were
+updated but not executed during this task. CI runs checks after transfer to
+the separate repository; do not infer test success from a static build.
 
-## Maintenance, release and rollback
+Before production, verify actual cookie login/logout with a browser, multiple
+cookies, expiration, cross-subsystem filtering, CSRF denial, frontend integration,
+all six readiness endpoints, trusted addresses, TLS and shutdown under load.
+Fixture tests do not establish these deployment results.
 
-For each change, update affected contracts and tests; run typecheck, lint,
-format:check, build and tests before release. This task did not execute tests.
-CI performs checks, test coverage, a production dependency audit and a container
-build after this folder is moved to its own repository.
+Record acceptance independently for MAD, HW, FDS, FOSS, KMS and WKMS. Each
+team should provide its environment, API version, login/logout and denial
+results, cookie/CSRF results, readiness evidence and outstanding issues.
+Acceptance of one subsystem does not establish compatibility for the others.
 
-Review dependencies, Node support, image tags and advisories regularly. Update
-dependencies in a branch, preserve package-lock.json and verify staging before
-release. Review route changes together with the destination service owner.
-
-Version source, image, routes and configuration together. Record image digest and
-upstream compatibility. For rollback, restore the previous accepted image plus its
-compatible route/environment configuration. Avoid rolling back to the old gateway
-auth design without its separate central-Auth dependencies and contracts.
-
-SIGINT/SIGTERM allow graceful close with a ten-second forced exit deadline. Keep
-the orchestrator grace period longer; the production example uses fifteen seconds.
-Compose alone does not supply rolling deployment or proven zero downtime.
-
-Back up configuration versions, secret-store references and Caddy certificate state.
-The gateway owns no database schema; rate counters do not need durable backup.
-Do not delete application repositories, planning documents or database volumes as
-part of gateway maintenance.
-
-## Acceptance still required
-
-The supplied isolated tests use local HTTP fixtures; see TEST_REGISTER.md.
-They do not establish real subsystem login correctness, production capacity or
-multi-replica behavior. Before release verify local MAD authentication, BFF path
-adaptation, each enabled backend's login/logout/denial behavior, Redis outages,
-shared quotas, trusted client addressing, TLS renewal and shutdown under traffic.
+For rollback, restore an accepted image and compatible environment/routes.
+Older images may require Redis or central Auth; do not mix their configurations.
+Back up configuration versions and Caddy state. The gateway owns no database.
+Do not delete planning documents, repositories or unrelated volumes during
+maintenance.

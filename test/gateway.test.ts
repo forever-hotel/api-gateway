@@ -7,6 +7,7 @@ import { buildApp } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
 import type { Config } from '../src/config.ts';
 import { requestPath } from '../src/http.ts';
+import { readFileSync } from 'node:fs';
 
 async function server(
   t: TestContext,
@@ -35,6 +36,7 @@ const routes = [
     prefix: '/mad',
     rewritePrefix: '/mad',
     upstreamEnv: 'MAD_SERVICE_URL',
+    cookieNames: ['mad_session', 'mad_csrf'],
   },
   {
     id: 'mad-auth',
@@ -42,6 +44,7 @@ const routes = [
     prefix: '/mad/auth',
     rewritePrefix: '/auth',
     upstreamEnv: 'MAD_SERVICE_URL',
+    cookieNames: ['mad_session', 'mad_csrf'],
   },
   ...['hw', 'fds', 'foss', 'kms', 'wkms'].map((id) => ({
     id,
@@ -49,6 +52,7 @@ const routes = [
     prefix: '/' + id,
     rewritePrefix: '/' + id,
     upstreamEnv: id.toUpperCase() + '_SERVICE_URL',
+    cookieNames: [id + '_session', id + '_csrf'],
   })),
   {
     id: 'disabled',
@@ -93,6 +97,19 @@ async function fixture(t: TestContext, overrides: Partial<Config> = {}) {
         }
         res.setHeader('content-type', 'application/json');
         res.setHeader('set-cookie', 'unsafe=1');
+        if (req.url?.endsWith('/cookies')) {
+          res.setHeader('set-cookie', [
+            service + '_session=opaque; Domain=internal.example; Path=/; HttpOnly; Secure; SameSite=None',
+            service + '_csrf=csrf-value; Path=/auth; Expires=Wed, 21 Oct 2037 07:28:00 GMT',
+            'other_session=do-not-forward; Path=/',
+          ]);
+        }
+        if (req.url?.endsWith('/logout')) {
+          res.setHeader('set-cookie', service + '_session=; Max-Age=0; Path=/; HttpOnly');
+          res.writeHead(204);
+          res.end();
+          return;
+        }
         if (req.url?.endsWith('/denied')) {
           res.writeHead(401, {
             'www-authenticate': 'Bearer realm="subsystem"',
@@ -305,6 +322,7 @@ test('CORS restricts origins and permits approved authorization preflight', asyn
     },
   });
   assert.equal(response.statusCode, 204);
+  assert.equal(response.headers['access-control-allow-credentials'], 'true');
   assert.equal(
     response.headers['access-control-allow-origin'],
     'http://localhost:3000',
@@ -343,4 +361,75 @@ test('configuration needs no JWT settings and rejects obsolete policy fields', (
   assert.throws(() =>
     loadConfig(env, [...madRoutes, { ...routes[0], id: 'other' }]),
   );
+  assert.doesNotThrow(() => loadConfig({
+    ...env, NODE_ENV: 'production', ALLOWED_ORIGINS: 'https://manager.example',
+  }, madRoutes));
+  assert.throws(() => loadConfig(env, [{ ...routes[0], cookieNames: ['__Host-session'] }]));
+  assert.throws(() => loadConfig(env, [
+    ...madRoutes,
+    { ...routes[0], id: 'fds', prefix: '/fds' },
+  ]));
+});
+
+test('only destination cookies are forwarded, with CSRF and origin headers intact', async (t) => {
+  const { app, calls } = await fixture(t);
+  const cookie = 'mad_session=opaque%2Ftoken; fds_session=another; mad_csrf=csrf-value; unrelated=x';
+  const response = await app.inject({
+    method: 'POST', url: '/mad/resource',
+    headers: { cookie, origin: 'http://localhost:3000', 'x-csrf-token': 'csrf-value' },
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(calls[0].headers.cookie, 'mad_session=opaque%2Ftoken; mad_csrf=csrf-value');
+  assert.equal(calls[0].headers.origin, 'http://localhost:3000');
+  assert.equal(calls[0].headers['x-csrf-token'], 'csrf-value');
+  await app.inject({ url: '/fds/resource', headers: { cookie } });
+  assert.equal(calls[1].headers.cookie, 'fds_session=another');
+});
+
+test('cookie writes reject missing or unapproved origins before forwarding', async (t) => {
+  const { app, calls } = await fixture(t);
+  for (const origin of [undefined, 'https://untrusted.example', 'null']) {
+    const response = await app.inject({
+      method: 'POST', url: '/mad/resource',
+      headers: { cookie: 'mad_session=opaque', ...(origin ? { origin } : {}) },
+    });
+    assert.equal(response.statusCode, 403);
+  }
+  assert.equal(calls.length, 0);
+});
+
+test('multiple Set-Cookie values preserve attributes and scope each subsystem', async (t) => {
+  const { app } = await fixture(t, { production: true });
+  for (const id of ['mad', 'hw', 'fds', 'foss', 'kms', 'wkms']) {
+    const response = await app.inject({ url: '/' + id + '/cookies' });
+    const cookies = response.headers['set-cookie'];
+    assert.ok(Array.isArray(cookies));
+    assert.equal(cookies.length, 2);
+    assert.equal(cookies[0], id + '_session=opaque; HttpOnly; Secure; SameSite=None; Path=/' + id);
+    assert.equal(cookies[1], id + '_csrf=csrf-value; Expires=Wed, 21 Oct 2037 07:28:00 GMT; Secure; SameSite=Lax; Path=/' + id);
+  }
+});
+
+test('MAD login cookie scope also covers business routes and logout clears the same path', async (t) => {
+  const { app } = await fixture(t);
+  const response = await app.inject({ url: '/mad/auth/cookies' });
+  const cookies = response.headers['set-cookie'];
+  assert.ok(Array.isArray(cookies));
+  assert.ok(cookies.every(cookie => cookie.endsWith('Path=/mad')));
+  const logout = await app.inject({
+    method: 'POST', url: '/mad/auth/logout',
+    headers: { cookie: 'mad_session=opaque', origin: 'http://localhost:3000' },
+  });
+  assert.equal(logout.statusCode, 204);
+  assert.deepEqual(logout.headers['set-cookie'], ['mad_session=; Max-Age=0; HttpOnly; SameSite=Lax; Path=/mad']);
+});
+
+test('shipped routes enable all six subsystems without Redis', () => {
+  const env: NodeJS.ProcessEnv = {
+    NODE_ENV: 'production', ALLOWED_ORIGINS: 'https://manager.example',
+  };
+  const ids = ['mad', 'hw', 'fds', 'foss', 'kms', 'wkms'];
+  for (const id of ids) env[id.toUpperCase() + '_SERVICE_URL'] = 'http://' + id + ':4000';
+  const config = loadConfig(env, JSON.parse(readFileSync('config/routes.json', 'utf8')));
+  for (const id of ids) assert.ok(config.routes.some(route => route.prefix === '/' + id));
 });

@@ -4,48 +4,76 @@
     "enabled": true,
     "prefix": "/mad/auth",
     "rewritePrefix": "/auth",
-    "upstreamEnv": "MAD_SERVICE_URL"
+    "upstreamEnv": "MAD_SERVICE_URL",
+    "cookieNames": [
+      "mad_session",
+      "mad_csrf"
+    ]
   },
   {
     "id": "mad",
     "enabled": true,
     "prefix": "/mad",
     "rewritePrefix": "/mad",
-    "upstreamEnv": "MAD_SERVICE_URL"
+    "upstreamEnv": "MAD_SERVICE_URL",
+    "cookieNames": [
+      "mad_session",
+      "mad_csrf"
+    ]
   },
   {
     "id": "hw",
-    "enabled": false,
+    "enabled": true,
     "prefix": "/hw",
     "rewritePrefix": "/hw",
-    "upstreamEnv": "HW_SERVICE_URL"
+    "upstreamEnv": "HW_SERVICE_URL",
+    "cookieNames": [
+      "hw_session",
+      "hw_csrf"
+    ]
   },
   {
     "id": "fds",
-    "enabled": false,
+    "enabled": true,
     "prefix": "/fds",
     "rewritePrefix": "/fds",
-    "upstreamEnv": "FDS_SERVICE_URL"
+    "upstreamEnv": "FDS_SERVICE_URL",
+    "cookieNames": [
+      "fds_session",
+      "fds_csrf"
+    ]
   },
   {
     "id": "foss",
-    "enabled": false,
+    "enabled": true,
     "prefix": "/foss",
     "rewritePrefix": "/foss",
-    "upstreamEnv": "FOSS_SERVICE_URL"
+    "upstreamEnv": "FOSS_SERVICE_URL",
+    "cookieNames": [
+      "foss_session",
+      "foss_csrf"
+    ]
   },
   {
     "id": "kms",
-    "enabled": false,
+    "enabled": true,
     "prefix": "/kms",
     "rewritePrefix": "/kms",
-    "upstreamEnv": "KMS_SERVICE_URL"
+    "upstreamEnv": "KMS_SERVICE_URL",
+    "cookieNames": [
+      "kms_session",
+      "kms_csrf"
+    ]
   },
   {
     "id": "wkms",
-    "enabled": false,
+    "enabled": true,
     "prefix": "/wkms",
     "rewritePrefix": "/wkms",
-    "upstreamEnv": "WKMS_SERVICE_URL"
+    "upstreamEnv": "WKMS_SERVICE_URL",
+    "cookieNames": [
+      "wkms_session",
+      "wkms_csrf"
+    ]
   }
 ]

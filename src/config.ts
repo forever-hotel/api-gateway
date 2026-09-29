@@ -14,6 +14,8 @@ export interface Route {
   prefix: string;
   rewritePrefix: string;
   upstream: string;
+  cookieNames: string[];
+  cookiePath: string;
 }
 export interface Config {
   production: boolean;
@@ -22,7 +24,6 @@ export interface Config {
   logLevel: string;
   origins: string[];
   trustedProxies: string[];
-  redisUrl?: string;
   rateMax: number;
   loginMax: number;
   windowMs: number;
@@ -110,16 +111,6 @@ export function loadConfig(
     )
       invalid('TRUSTED_PROXIES');
   }
-  const redisUrl = env.REDIS_URL?.trim() || undefined;
-  if (production && !redisUrl) invalid('REDIS_URL (required in production)');
-  if (redisUrl) {
-    try {
-      if (!['redis:', 'rediss:'].includes(new URL(redisUrl).protocol))
-        invalid('REDIS_URL');
-    } catch {
-      invalid('REDIS_URL');
-    }
-  }
   let raw: unknown = source;
   if (raw === undefined) {
     try {
@@ -138,9 +129,14 @@ export function loadConfig(
     if (
       Object.keys(item).some(
         (key) =>
-          !['id', 'enabled', 'prefix', 'rewritePrefix', 'upstreamEnv'].includes(
-            key,
-          ),
+          ![
+            'id',
+            'enabled',
+            'prefix',
+            'rewritePrefix',
+            'upstreamEnv',
+            'cookieNames',
+          ].includes(key),
       )
     )
       invalid('route fields (only routing configuration is supported)');
@@ -166,11 +162,34 @@ export function loadConfig(
     )
       invalid('route upstreamEnv');
     const upstream = origin(env[item.upstreamEnv], item.upstreamEnv);
+    const cookieNames = item.cookieNames ?? [];
+    if (
+      !Array.isArray(cookieNames) ||
+      cookieNames.some(
+        (name) =>
+          typeof name !== 'string' ||
+          !/^[A-Za-z0-9_-]+$/.test(name) ||
+          name.startsWith('__Host-'),
+      ) ||
+      new Set(cookieNames).size !== cookieNames.length
+    )
+      invalid('route cookieNames (unique names; __Host- requires Path=/)');
+    const cookiePath = '/' + item.prefix.split('/')[1];
+    if (
+      routes.some(
+        (route) =>
+          route.cookiePath !== cookiePath &&
+          route.cookieNames.some((name) => cookieNames.includes(name)),
+      )
+    )
+      invalid('cookie names must be unique across subsystems');
     routes.push({
       id: item.id,
       prefix: item.prefix,
       rewritePrefix: item.rewritePrefix,
       upstream,
+      cookieNames,
+      cookiePath,
     });
   }
   if (!routes.length) invalid('enabled routes');
@@ -186,7 +205,6 @@ export function loadConfig(
     logLevel,
     origins,
     trustedProxies,
-    redisUrl,
     routes,
     rateMax: integer('RATE_LIMIT_MAX', 120, 1, 100000),
     loginMax: integer('LOGIN_RATE_LIMIT_MAX', 10, 1, 10000),
