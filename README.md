@@ -11,6 +11,9 @@ memory. Frontend offline caching belongs to the relevant subsystem.
 
 ## Routes
 
+For the complete team handoff, configuration, cookie integration and maintenance
+instructions, read [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md).
+
 All six subsystems are enabled. The example ports must match your actual backends.
 
 | Gateway path | Upstream path | Example port | Allowed cookie names |
