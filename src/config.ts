@@ -145,7 +145,7 @@ export function loadConfig(
       typeof item.id !== 'string' ||
       !/^[a-z][a-z0-9-]*$/.test(item.id) ||
       !path(item.prefix) ||
-      !path(item.rewritePrefix)
+      !(item.rewritePrefix === '' || path(item.rewritePrefix))
     )
       invalid('route id/prefix');
     if (item.prefix === '/health' || item.prefix.startsWith('/health/'))
