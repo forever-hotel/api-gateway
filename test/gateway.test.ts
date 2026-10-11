@@ -8,7 +8,6 @@ import { loadConfig } from '../src/config.ts';
 import type { Config } from '../src/config.ts';
 import { requestPath } from '../src/http.ts';
 import { readFileSync } from 'node:fs';
-
 async function server(
   t: TestContext,
   handler: (req: IncomingMessage, res: ServerResponse) => void,
@@ -28,7 +27,6 @@ async function server(
   assert.ok(address && typeof address === 'object');
   return `http://127.0.0.1:${address.port}`;
 }
-
 const routes = [
   {
     id: 'mad',
@@ -62,8 +60,11 @@ const routes = [
     upstreamEnv: 'DISABLED_SERVICE_URL',
   },
 ];
-
-async function fixture(t: TestContext, overrides: Partial<Config> = {}) {
+async function fixture(
+  t: TestContext,
+  overrides: Partial<Config> = {},
+  routeDefinitions: unknown = routes,
+) {
   let ready = true;
   const calls: {
     path?: string;
@@ -99,13 +100,18 @@ async function fixture(t: TestContext, overrides: Partial<Config> = {}) {
         res.setHeader('set-cookie', 'unsafe=1');
         if (req.url?.endsWith('/cookies')) {
           res.setHeader('set-cookie', [
-            service + '_session=opaque; Domain=internal.example; Path=/; HttpOnly; Secure; SameSite=None',
-            service + '_csrf=csrf-value; Path=/auth; Expires=Wed, 21 Oct 2037 07:28:00 GMT',
+            service +
+              '_session=opaque; Domain=internal.example; Path=/; HttpOnly; Secure; SameSite=None',
+            service +
+              '_csrf=csrf-value; Path=/auth; Expires=Wed, 21 Oct 2037 07:28:00 GMT',
             'other_session=do-not-forward; Path=/',
           ]);
         }
         if (req.url?.endsWith('/logout')) {
-          res.setHeader('set-cookie', service + '_session=; Max-Age=0; Path=/; HttpOnly');
+          res.setHeader(
+            'set-cookie',
+            service + '_session=; Max-Age=0; Path=/; HttpOnly',
+          );
           res.writeHead(204);
           res.end();
           return;
@@ -132,7 +138,7 @@ async function fixture(t: TestContext, overrides: Partial<Config> = {}) {
   for (const id of ['mad', 'hw', 'fds', 'foss', 'kms', 'wkms']) {
     env[id.toUpperCase() + '_SERVICE_URL'] = await server(t, handler(id));
   }
-  const config = loadConfig(env, routes);
+  const config = loadConfig(env, routeDefinitions);
   Object.assign(config, overrides);
   const app = await buildApp(config, false);
   t.after(() => app.close());
@@ -145,7 +151,6 @@ async function fixture(t: TestContext, overrides: Partial<Config> = {}) {
     },
   };
 }
-
 test('MAD login rewrites the longest prefix and preserves raw bytes without central Auth', async (t) => {
   const { app, calls } = await fixture(t);
   const payload = '{ "username": "manager", "password": "fixture" }';
@@ -177,7 +182,6 @@ test('MAD login rewrites the longest prefix and preserves raw bytes without cent
   assert.equal(response.headers['set-cookie'], undefined);
   assert.equal(response.headers['cache-control'], 'no-store');
 });
-
 test('all six services receive their own login requests', async (t) => {
   const { app, calls } = await fixture(t);
   for (const id of ['mad', 'hw', 'fds', 'foss', 'kms', 'wkms']) {
@@ -194,6 +198,62 @@ test('all six services receive their own login requests', async (t) => {
       id === 'mad' ? '/auth/login' : '/' + id + '/auth/login',
     );
   }
+});
+test('FDS shipped routing removes prefix and preserves other subsystem routes', async (t) => {
+  // Use the shipped routes rather than a duplicated FDS test configuration.
+  // This test fails if config/routes.json is accidentally reverted.
+  const shippedRoutes: unknown = JSON.parse(
+    readFileSync('config/routes.json', 'utf8'),
+  );
+  const { app, calls, config } = await fixture(t, {}, shippedRoutes);
+
+  assert.equal(
+    config.routes.find((route) => route.id === 'fds')?.rewritePrefix,
+    '',
+  );
+
+  const ready = await app.inject({ url: '/fds/health/ready' });
+  assert.equal(ready.statusCode, 200);
+
+  const arrivals = await app.inject({
+    method: 'GET',
+    url: '/fds/bookings/arrivals?date=2026-10-08',
+    headers: { authorization: 'Bearer opaque-test-token' },
+  });
+  assert.equal(arrivals.statusCode, 200);
+  assert.equal(calls.at(-1)?.service, 'fds');
+  assert.equal(calls.at(-1)?.path, '/bookings/arrivals?date=2026-10-08');
+  assert.equal(calls.at(-1)?.headers.authorization, 'Bearer opaque-test-token');
+
+  const checkIn = await app.inject({
+    method: 'POST',
+    url: '/fds/check-in',
+    headers: { 'content-type': 'application/json' },
+    payload: '{}',
+  });
+  assert.equal(checkIn.statusCode, 200);
+  assert.equal(calls.at(-1)?.service, 'fds');
+  assert.equal(calls.at(-1)?.path, '/check-in');
+  assert.equal(calls.at(-1)?.body, '{}');
+
+  // These five routes must retain exactly their existing upstream paths.
+  for (const id of ['mad', 'hw', 'foss', 'kms', 'wkms']) {
+    const response = await app.inject({ url: `/${id}/rooms` });
+    assert.equal(response.statusCode, 200, `${id} returned wrong status`);
+    assert.equal(calls.at(-1)?.service, id);
+    assert.equal(calls.at(-1)?.path, `/${id}/rooms`);
+  }
+
+  // Preserve the more specific existing MAD authentication route as well.
+  const madLogin = await app.inject({
+    method: 'POST',
+    url: '/mad/auth/login',
+    headers: { 'content-type': 'application/json' },
+    payload: '{}',
+  });
+  assert.equal(madLogin.statusCode, 200);
+  assert.equal(calls.at(-1)?.service, 'mad');
+  assert.equal(calls.at(-1)?.path, '/auth/login');
 });
 
 test('query and opaque authorization are forwarded without JWT or role validation', async (t) => {
@@ -219,7 +279,6 @@ test('query and opaque authorization are forwarded without JWT or role validatio
     200,
   );
 });
-
 test('subsystem owns session and permission errors, including its error body', async (t) => {
   const { app } = await fixture(t);
   const denied = await app.inject({ url: '/mad/denied' });
@@ -230,7 +289,6 @@ test('subsystem owns session and permission errors, including its error body', a
   assert.equal(forbidden.statusCode, 403);
   assert.equal(forbidden.json().code, 'PASSWORD_CHANGE_REQUIRED');
 });
-
 test('bounded timeout, safe upstream errors and redirects', async (t) => {
   const { app } = await fixture(t, { upstreamTimeout: 100 });
   for (const [path, status] of [
@@ -243,7 +301,6 @@ test('bounded timeout, safe upstream errors and redirects', async (t) => {
     assert.ok(!response.body.includes('private'));
   }
 });
-
 test('unknown/disabled routes and ambiguous paths never reach an upstream', async (t) => {
   const { app, calls } = await fixture(t);
   for (const url of [
@@ -259,7 +316,6 @@ test('unknown/disabled routes and ambiguous paths never reach an upstream', asyn
   assert.throws(() => requestPath('/mad/../auth'));
   assert.throws(() => requestPath('/mad\\auth'));
 });
-
 test('request and response body limits remain enforced', async (t) => {
   const { app } = await fixture(t, { bodyLimit: 16, responseLimit: 8 });
   assert.equal(
@@ -274,7 +330,6 @@ test('request and response body limits remain enforced', async (t) => {
   );
   assert.equal((await app.inject({ url: '/mad/resource' })).statusCode, 502);
 });
-
 test('login limits and downstream denials both consume the client quota', async (t) => {
   const { app } = await fixture(t, { loginMax: 1, rateMax: 2 });
   assert.equal(
@@ -300,7 +355,6 @@ test('login limits and downstream denials both consume the client quota', async 
     429,
   );
 });
-
 test('CORS restricts origins and permits approved authorization preflight', async (t) => {
   const { app, calls } = await fixture(t);
   assert.equal(
@@ -329,7 +383,6 @@ test('CORS restricts origins and permits approved authorization preflight', asyn
   );
   assert.equal(calls.length, 0);
 });
-
 test('health depends on enabled services without a central session lookup', async (t) => {
   const { app, outage } = await fixture(t);
   assert.equal((await app.inject({ url: '/health/ready' })).statusCode, 200);
@@ -337,7 +390,6 @@ test('health depends on enabled services without a central session lookup', asyn
   assert.equal((await app.inject({ url: '/health/ready' })).statusCode, 503);
   assert.equal((await app.inject({ url: '/health/live' })).statusCode, 200);
 });
-
 test('configuration needs no JWT settings and rejects obsolete policy fields', () => {
   const env = {
     MAD_SERVICE_URL: 'http://localhost:4000',
@@ -361,43 +413,61 @@ test('configuration needs no JWT settings and rejects obsolete policy fields', (
   assert.throws(() =>
     loadConfig(env, [...madRoutes, { ...routes[0], id: 'other' }]),
   );
-  assert.doesNotThrow(() => loadConfig({
-    ...env, NODE_ENV: 'production', ALLOWED_ORIGINS: 'https://manager.example',
-  }, madRoutes));
-  assert.throws(() => loadConfig(env, [{ ...routes[0], cookieNames: ['__Host-session'] }]));
-  assert.throws(() => loadConfig(env, [
-    ...madRoutes,
-    { ...routes[0], id: 'fds', prefix: '/fds' },
-  ]));
+  assert.doesNotThrow(() =>
+    loadConfig(
+      {
+        ...env,
+        NODE_ENV: 'production',
+        ALLOWED_ORIGINS: 'https://manager.example',
+      },
+      madRoutes,
+    ),
+  );
+  assert.throws(() =>
+    loadConfig(env, [{ ...routes[0], cookieNames: ['__Host-session'] }]),
+  );
+  assert.throws(() =>
+    loadConfig(env, [
+      ...madRoutes,
+      { ...routes[0], id: 'fds', prefix: '/fds' },
+    ]),
+  );
 });
-
 test('only destination cookies are forwarded, with CSRF and origin headers intact', async (t) => {
   const { app, calls } = await fixture(t);
-  const cookie = 'mad_session=opaque%2Ftoken; fds_session=another; mad_csrf=csrf-value; unrelated=x';
+  const cookie =
+    'mad_session=opaque%2Ftoken; fds_session=another; mad_csrf=csrf-value; unrelated=x';
   const response = await app.inject({
-    method: 'POST', url: '/mad/resource',
-    headers: { cookie, origin: 'http://localhost:3000', 'x-csrf-token': 'csrf-value' },
+    method: 'POST',
+    url: '/mad/resource',
+    headers: {
+      cookie,
+      origin: 'http://localhost:3000',
+      'x-csrf-token': 'csrf-value',
+    },
   });
   assert.equal(response.statusCode, 200);
-  assert.equal(calls[0].headers.cookie, 'mad_session=opaque%2Ftoken; mad_csrf=csrf-value');
+  assert.equal(
+    calls[0].headers.cookie,
+    'mad_session=opaque%2Ftoken; mad_csrf=csrf-value',
+  );
   assert.equal(calls[0].headers.origin, 'http://localhost:3000');
   assert.equal(calls[0].headers['x-csrf-token'], 'csrf-value');
   await app.inject({ url: '/fds/resource', headers: { cookie } });
   assert.equal(calls[1].headers.cookie, 'fds_session=another');
 });
-
 test('cookie writes reject missing or unapproved origins before forwarding', async (t) => {
   const { app, calls } = await fixture(t);
   for (const origin of [undefined, 'https://untrusted.example', 'null']) {
     const response = await app.inject({
-      method: 'POST', url: '/mad/resource',
+      method: 'POST',
+      url: '/mad/resource',
       headers: { cookie: 'mad_session=opaque', ...(origin ? { origin } : {}) },
     });
     assert.equal(response.statusCode, 403);
   }
   assert.equal(calls.length, 0);
 });
-
 test('multiple Set-Cookie values preserve attributes and scope each subsystem', async (t) => {
   const { app } = await fixture(t, { production: true });
   for (const id of ['mad', 'hw', 'fds', 'foss', 'kms', 'wkms']) {
@@ -405,31 +475,46 @@ test('multiple Set-Cookie values preserve attributes and scope each subsystem', 
     const cookies = response.headers['set-cookie'];
     assert.ok(Array.isArray(cookies));
     assert.equal(cookies.length, 2);
-    assert.equal(cookies[0], id + '_session=opaque; HttpOnly; Secure; SameSite=None; Path=/' + id);
-    assert.equal(cookies[1], id + '_csrf=csrf-value; Expires=Wed, 21 Oct 2037 07:28:00 GMT; Secure; SameSite=Lax; Path=/' + id);
+    assert.equal(
+      cookies[0],
+      id + '_session=opaque; HttpOnly; Secure; SameSite=None; Path=/' + id,
+    );
+    assert.equal(
+      cookies[1],
+      id +
+        '_csrf=csrf-value; Expires=Wed, 21 Oct 2037 07:28:00 GMT; Secure; SameSite=Lax; Path=/' +
+        id,
+    );
   }
 });
-
 test('MAD login cookie scope also covers business routes and logout clears the same path', async (t) => {
   const { app } = await fixture(t);
   const response = await app.inject({ url: '/mad/auth/cookies' });
   const cookies = response.headers['set-cookie'];
   assert.ok(Array.isArray(cookies));
-  assert.ok(cookies.every(cookie => cookie.endsWith('Path=/mad')));
+  assert.ok(cookies.every((cookie) => cookie.endsWith('Path=/mad')));
   const logout = await app.inject({
-    method: 'POST', url: '/mad/auth/logout',
+    method: 'POST',
+    url: '/mad/auth/logout',
     headers: { cookie: 'mad_session=opaque', origin: 'http://localhost:3000' },
   });
   assert.equal(logout.statusCode, 204);
-  assert.deepEqual(logout.headers['set-cookie'], ['mad_session=; Max-Age=0; HttpOnly; SameSite=Lax; Path=/mad']);
+  assert.deepEqual(logout.headers['set-cookie'], [
+    'mad_session=; Max-Age=0; HttpOnly; SameSite=Lax; Path=/mad',
+  ]);
 });
-
 test('shipped routes enable all six subsystems without Redis', () => {
   const env: NodeJS.ProcessEnv = {
-    NODE_ENV: 'production', ALLOWED_ORIGINS: 'https://manager.example',
+    NODE_ENV: 'production',
+    ALLOWED_ORIGINS: 'https://manager.example',
   };
   const ids = ['mad', 'hw', 'fds', 'foss', 'kms', 'wkms'];
-  for (const id of ids) env[id.toUpperCase() + '_SERVICE_URL'] = 'http://' + id + ':4000';
-  const config = loadConfig(env, JSON.parse(readFileSync('config/routes.json', 'utf8')));
-  for (const id of ids) assert.ok(config.routes.some(route => route.prefix === '/' + id));
+  for (const id of ids)
+    env[id.toUpperCase() + '_SERVICE_URL'] = 'http://' + id + ':4000';
+  const config = loadConfig(
+    env,
+    JSON.parse(readFileSync('config/routes.json', 'utf8')),
+  );
+  for (const id of ids)
+    assert.ok(config.routes.some((route) => route.prefix === '/' + id));
 });

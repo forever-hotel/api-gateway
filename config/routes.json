@@ -36,7 +36,7 @@
     "id": "fds",
     "enabled": true,
     "prefix": "/fds",
-    "rewritePrefix": "/fds",
+    "rewritePrefix": "",
     "upstreamEnv": "FDS_SERVICE_URL",
     "cookieNames": [
       "fds_session",

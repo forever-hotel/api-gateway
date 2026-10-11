@@ -21,7 +21,7 @@ All six subsystems are enabled. The example ports must match your actual backend
 | `/mad/auth/*` | `/auth/*` | 4000 | mad_session, mad_csrf |
 | `/mad/*` | `/mad/*` | 4000 | mad_session, mad_csrf |
 | `/hw/*` | `/hw/*` | 4100 | hw_session, hw_csrf |
-| `/fds/*` | `/fds/*` | 4200 | fds_session, fds_csrf |
+| `/fds/*` | `/*` | 4200 | fds_session, fds_csrf |
 | `/foss/*` | `/foss/*` | 4300 | foss_session, foss_csrf |
 | `/kms/*` | `/kms/*` | 4500 | kms_session, kms_csrf |
 | `/wkms/*` | `/wkms/*` | 4600 | wkms_session, wkms_csrf |
@@ -33,6 +33,16 @@ does not create the subsystem implementations.
 GET /health/live checks the gateway process. GET /health/ready checks every distinct
 enabled backend's /health/ready endpoint. It returns 503 if any backend is unavailable;
 other routes can still forward to their available backends.
+
+**Front Desk (FDS) routing:** The gateway strips the `/fds` prefix before
+forwarding requests to the Front Desk backend. For example,
+`GET /fds/health/ready` is forwarded as `GET /health/ready`, and
+`GET /fds/bookings/arrivals?date=2026-10-08` is forwarded as
+`GET /bookings/arrivals?date=2026-10-08`.
+
+This rewrite applies only to FDS. Other subsystem route mappings
+remain unchanged. Authentication and authorization are enforced
+by the Front Desk backend.
 
 ## Local setup (PowerShell)
 
