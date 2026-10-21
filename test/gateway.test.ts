@@ -236,8 +236,8 @@ test('FDS shipped routing removes prefix and preserves other subsystem routes', 
   assert.equal(calls.at(-1)?.path, '/check-in');
   assert.equal(calls.at(-1)?.body, '{}');
 
-  // These five routes must retain exactly their existing upstream paths.
-  for (const id of ['mad', 'hw', 'foss', 'kms', 'wkms']) {
+  // These four routes must retain exactly their existing upstream paths.
+  for (const id of ['mad', 'foss', 'kms', 'wkms']) {
     const response = await app.inject({ url: `/${id}/rooms` });
     assert.equal(response.statusCode, 200, `${id} returned wrong status`);
     assert.equal(calls.at(-1)?.service, id);
@@ -254,6 +254,39 @@ test('FDS shipped routing removes prefix and preserves other subsystem routes', 
   assert.equal(madLogin.statusCode, 200);
   assert.equal(calls.at(-1)?.service, 'mad');
   assert.equal(calls.at(-1)?.path, '/auth/login');
+});
+
+test('HW shipped routes strip the prefix for rooms, contact and guest authentication', async (t) => {
+  const shippedRoutes: unknown = JSON.parse(
+    readFileSync('config/routes.json', 'utf8'),
+  );
+  const { app, calls } = await fixture(t, {}, shippedRoutes);
+  for (const [method, path] of [
+    ['GET', '/room-types'],
+    ['GET', '/room-types/room-id?preview=true'],
+    ['POST', '/contact/enquiries'],
+    ['POST', '/guests/register'],
+    ['POST', '/guests/login'],
+    ['GET', '/guests/me'],
+  ] as const) {
+    const response = await app.inject({
+      method,
+      url: '/hw' + path,
+      headers: {
+        authorization: 'Bearer opaque-test-token',
+        ...(method === 'POST' ? { 'content-type': 'application/json' } : {}),
+      },
+      ...(method === 'POST' ? { payload: '{}' } : {}),
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(calls.at(-1)?.service, 'hw');
+    assert.equal(calls.at(-1)?.path, path);
+    assert.equal(
+      calls.at(-1)?.headers.authorization,
+      'Bearer opaque-test-token',
+    );
+    if (method === 'POST') assert.equal(calls.at(-1)?.body, '{}');
+  }
 });
 
 test('query and opaque authorization are forwarded without JWT or role validation', async (t) => {

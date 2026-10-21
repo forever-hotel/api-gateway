@@ -20,7 +20,7 @@ All six subsystems are enabled. The example ports must match your actual backend
 | --- | --- | --- | --- |
 | `/mad/auth/*` | `/auth/*` | 4000 | mad_session, mad_csrf |
 | `/mad/*` | `/mad/*` | 4000 | mad_session, mad_csrf |
-| `/hw/*` | `/hw/*` | 4100 | hw_session, hw_csrf |
+| `/hw/*` | `/*` | 4100 | hw_session, hw_csrf |
 | `/fds/*` | `/*` | 4200 | fds_session, fds_csrf |
 | `/foss/*` | `/foss/*` | 4300 | foss_session, foss_csrf |
 | `/kms/*` | `/kms/*` | 4500 | kms_session, kms_csrf |
@@ -40,7 +40,7 @@ forwarding requests to the Front Desk backend. For example,
 `GET /fds/bookings/arrivals?date=2026-10-08` is forwarded as
 `GET /bookings/arrivals?date=2026-10-08`.
 
-This rewrite applies only to FDS. Other subsystem route mappings
+The HW route also strips its `/hw` prefix. Other subsystem route mappings
 remain unchanged. Authentication and authorization are enforced
 by the Front Desk backend.
 
@@ -175,3 +175,7 @@ Tests were updated but not run. See [TEST_REGISTER.md](TEST_REGISTER.md).
 Copy this folder, including dotfiles and lockfile, into its own repository.
 Exclude node_modules, caches, generated output and actual environment files.
 The parent repository currently ignores api-gateway.
+
+Hotel website integration: /hw/room-types, /hw/contact/enquiries, and
+/hw/guests/{register,login,me} forward to the same paths without /hw.
+Guest authentication uses the backend Authorization bearer token contract.

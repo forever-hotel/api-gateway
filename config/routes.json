@@ -25,7 +25,7 @@
     "id": "hw",
     "enabled": true,
     "prefix": "/hw",
-    "rewritePrefix": "/hw",
+    "rewritePrefix": "",
     "upstreamEnv": "HW_SERVICE_URL",
     "cookieNames": [
       "hw_session",
