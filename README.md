@@ -11,20 +11,17 @@ memory. Frontend offline caching belongs to the relevant subsystem.
 
 ## Routes
 
-For the complete team handoff, configuration, cookie integration and maintenance
-instructions, read [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md).
-
 All six subsystems are enabled. The example ports must match your actual backends.
 
-| Gateway path | Upstream path | Example port | Allowed cookie names |
-| --- | --- | --- | --- |
-| `/mad/auth/*` | `/auth/*` | 4000 | mad_session, mad_csrf |
-| `/mad/*` | `/mad/*` | 4000 | mad_session, mad_csrf |
-| `/hw/*` | `/hw/*` | 4100 | hw_session, hw_csrf |
-| `/fds/*` | `/*` | 4200 | fds_session, fds_csrf |
-| `/foss/*` | `/foss/*` | 4300 | foss_session, foss_csrf |
-| `/kms/*` | `/kms/*` | 4500 | kms_session, kms_csrf |
-| `/wkms/*` | `/wkms/*` | 4600 | wkms_session, wkms_csrf |
+| Gateway path  | Upstream path | Example port | Allowed cookie names    |
+| ------------- | ------------- | ------------ | ----------------------- |
+| `/mad/auth/*` | `/auth/*`     | 4000         | mad_session, mad_csrf   |
+| `/mad/*`      | `/mad/*`      | 4000         | mad_session, mad_csrf   |
+| `/hw/*`       | `/hw/*`       | 4100         | hw_session, hw_csrf     |
+| `/fds/*`      | `/*`          | 4200         | fds_session, fds_csrf   |
+| `/foss/*`     | `/foss/*`     | 4300         | foss_session, foss_csrf |
+| `/kms/*`      | `/kms/*`      | 4500         | kms_session, kms_csrf   |
+| `/wkms/*`     | `/wkms/*`     | 4600         | wkms_session, wkms_csrf |
 
 The longest prefix wins. There is no shared /auth or /identity route.
 Confirm each backend's paths and update rewritePrefix as needed. Enabling routes
@@ -74,7 +71,7 @@ docker compose down
 
 Local Compose starts only the gateway and points the six routes at host services.
 It does not create backends or databases. Production Compose adds a Caddy HTTPS
-edge. See [MAINTENANCE.md](MAINTENANCE.md) before deployment.
+edge using the settings in `compose.production.yaml` and `deploy/Caddyfile`.
 
 ## Cookies and browser calls
 
@@ -150,8 +147,9 @@ policies. Credential forwarding does not create single sign-on.
 
 These steps are required independently for all six teams. Route availability does
 not establish that a subsystem's authentication or frontend integration is complete.
-See [MAINTENANCE.md](MAINTENANCE.md) for route templates, BFF integration and the
-shared operating procedures.
+Set `ROUTES_FILE` to select a different route file, or set `ROUTES_JSON` to an
+inline JSON route array. `ROUTES_JSON` takes precedence and supports read-only
+Compose containers without mounting a generated configuration file.
 
 ## Verification and transfer
 
@@ -171,7 +169,14 @@ npm.cmd test
 npm.cmd run test:cov
 ```
 
-Tests were updated but not run. See [TEST_REGISTER.md](TEST_REGISTER.md).
+GitHub Actions runs on pushes and pull requests targeting `develop` or `main`.
+It installs dependencies without lifecycle scripts, checks types, lint and
+formatting, builds NestJS, runs the gateway behavior tests with coverage, and
+rejects high/critical dependency advisories. Coverage is uploaded as the
+`gateway-coverage` artifact (`coverage/lcov.info`). No deployment or container
+checks run in this workflow. The tests use local fixture servers rather than
+live subsystem services, so no database or application secrets are required.
+
 Copy this folder, including dotfiles and lockfile, into its own repository.
 Exclude node_modules, caches, generated output and actual environment files.
 The parent repository currently ignores api-gateway.

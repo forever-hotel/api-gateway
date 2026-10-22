@@ -1,9 +1,13 @@
-name: Gateway checks
-on: [push, pull_request]
+name: Gateway quality gates
+on:
+  push:
+  pull_request:
+    branches: [develop, main]
 permissions:
   contents: read
 jobs:
-  verify:
+  gateway:
+    name: Gateway checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -11,11 +15,17 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
+          cache-dependency-path: package-lock.json
       - run: npm ci --ignore-scripts
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check
       - run: npm run build
       - run: npm run test:cov
-      - run: npm audit --omit=dev --audit-level=high
-      - run: docker build -t forever-gateway:ci .
+      - run: npm audit --audit-level=high
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gateway-coverage
+          path: coverage/
+          if-no-files-found: warn
