@@ -75,6 +75,7 @@ Configuration loads once at startup. Restart after environment or route changes.
 | UPSTREAM_TIMEOUT_MS | 4000 | Request and response-reading deadline |
 | HEALTH_TIMEOUT_MS | 2000 | Each backend readiness deadline |
 | ROUTES_FILE | config/routes.json | Relative to gateway working directory |
+| ROUTES_JSON | Unset | Inline route array; overrides ROUTES_FILE when set |
 
 All six routes are enabled, so all service URLs are required. Origins must be
 HTTP(S), with no credentials, path, query or fragment. Existing .env files are

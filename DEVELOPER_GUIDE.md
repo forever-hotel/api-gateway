@@ -189,6 +189,7 @@ on a shared browser origin.
 | *_SERVICE_URL | See route table | Required for enabled route destinations |
 | ALLOWED_ORIGINS | Exact frontend origins | Comma-separated; no wildcard |
 | ROUTES_FILE | config/routes.json | Relative to working directory unless absolute |
+| ROUTES_JSON | Unset | Inline JSON route array; takes precedence over ROUTES_FILE, useful for read-only Compose containers |
 | TRUSTED_PROXIES | Empty | Explicit trusted proxy IPs/CIDRs |
 | RATE_LIMIT_MAX | 120 | Per-process client-IP window threshold |
 | LOGIN_RATE_LIMIT_MAX | 10 | Lower threshold for paths ending /login |

@@ -115,10 +115,11 @@ export function loadConfig(
   if (raw === undefined) {
     try {
       raw = JSON.parse(
-        readFileSync(env.ROUTES_FILE || 'config/routes.json', 'utf8'),
+        env.ROUTES_JSON ??
+          readFileSync(env.ROUTES_FILE || 'config/routes.json', 'utf8'),
       );
     } catch {
-      invalid('ROUTES_FILE');
+      invalid(env.ROUTES_JSON === undefined ? 'ROUTES_FILE' : 'ROUTES_JSON');
     }
   }
   if (!Array.isArray(raw) || !raw.length) invalid('ROUTES_FILE');
