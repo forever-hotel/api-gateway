@@ -1,7 +1,7 @@
 # Shared API gateway: developer handoff
 
 This guide applies to MAD, HW, FDS, FOSS, KMS and WKMS. The gateway is a standalone
-Fastify application written in TypeScript, not a NestJS application. Subsystem
+NestJS application using the Fastify adapter, written in TypeScript. Subsystem
 backends can use NestJS or another HTTP framework.
 
 ## What it does

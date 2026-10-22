@@ -18,7 +18,7 @@ async function main() {
   process.on('SIGTERM', () => {
     void stop();
   });
-  await app.listen({ host: config.host, port: config.port });
+  await app.listen(config.port, config.host);
 }
 main().catch((error: unknown) => {
   // Startup exceptions can contain private upstream URLs.

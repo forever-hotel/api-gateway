@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { buildApp } from '../src/app.ts';
+import { GatewayTransport } from '../src/gateway.transport.ts';
 import { loadConfig } from '../src/config.ts';
 import type { Config } from '../src/config.ts';
 import { requestPath } from '../src/http.ts';
@@ -151,6 +152,16 @@ async function fixture(
     },
   };
 }
+test('Nest owns the Fastify application and gateway transport', async (t) => {
+  const { app } = await fixture(t);
+  assert.equal(app.getHttpAdapter().getType(), 'fastify');
+  assert.ok(app.get(GatewayTransport) instanceof GatewayTransport);
+  assert.equal(app.getHttpServer(), app.getHttpAdapter().getInstance().server);
+  const response = await app.inject({ method: 'GET', url: '/unknown' });
+  assert.equal(response.statusCode, 404);
+  assert.equal(response.json().code, 'NOT_FOUND');
+});
+
 test('MAD login rewrites the longest prefix and preserves raw bytes without central Auth', async (t) => {
   const { app, calls } = await fixture(t);
   const payload = '{ "username": "manager", "password": "fixture" }';

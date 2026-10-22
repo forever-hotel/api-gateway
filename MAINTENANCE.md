@@ -3,7 +3,7 @@
 ## Architecture and requirements
 
 This guide is for the owners of MAD, HW, FDS, FOSS, KMS and WKMS and the team
-operating the shared gateway. The gateway is a standalone TypeScript/Fastify
+operating the shared gateway. The gateway is a standalone NestJS/Fastify
 application, independent of the frameworks used by subsystem backends.
 Each backend owns credential verification,
 session/token issuance and validation, permissions, password policy and logout.
@@ -30,7 +30,10 @@ gateway route does not complete those changes.
 | Path | Purpose |
 | --- | --- |
 | src/config.ts | Environment, prefix and cookie-name validation |
-| src/app.ts | Forwarding, limits, CORS, health, logs |
+| src/app.ts | NestJS application bootstrap |
+| src/gateway.module.ts | Nest module and configuration injection |
+| src/gateway.adapter.ts | Preserve transport-owned error handlers |
+| src/gateway.transport.ts | Forwarding, limits, CORS, health, logs |
 | src/cookies.ts | Subsystem cookie filtering and response scope |
 | src/http.ts | Canonical paths and bounded responses |
 | src/errors.ts | Safe transport errors |

@@ -1,6 +1,6 @@
 # Forever Hotel API gateway
 
-Shared Fastify application written in TypeScript for MAD, HW, FDS, FOSS, KMS
+Shared NestJS application using the Fastify adapter for MAD, HW, FDS, FOSS, KMS
 and WKMS. This guide applies to every subsystem team. Each subsystem
 owns login, credentials, token/session validation, permissions and logout.
 The gateway routes requests and applies CORS, IP rate limits, body limits,
