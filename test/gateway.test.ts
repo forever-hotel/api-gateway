@@ -8,6 +8,28 @@ import { loadConfig } from '../src/config.ts';
 import type { Config } from '../src/config.ts';
 import { requestPath } from '../src/http.ts';
 import { readFileSync } from 'node:fs';
+
+test('HW forwards PayHere form notifications byte-for-byte without guest authentication', async (t) => {
+  const shippedRoutes: unknown = JSON.parse(
+    readFileSync('config/routes.json', 'utf8'),
+  );
+  const { app, calls } = await fixture(t, {}, shippedRoutes);
+  const payload =
+    'merchant_id=123456&order_id=fixture&payhere_amount=20000.00&status_code=2&md5sig=ABC%2B123';
+  const response = await app.inject({
+    method: 'POST',
+    url: '/hw/payments/payhere/notify',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    payload,
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(calls.at(-1)?.path, '/payments/payhere/notify');
+  assert.equal(calls.at(-1)?.body, payload);
+  assert.equal(
+    calls.at(-1)?.headers['content-type'],
+    'application/x-www-form-urlencoded',
+  );
+});
 async function server(
   t: TestContext,
   handler: (req: IncomingMessage, res: ServerResponse) => void,
