@@ -18,13 +18,13 @@ export async function buildApp(config: Config, logging = true) {
     requestTimeout: 15000,
     connectionTimeout: 15000,
     keepAliveTimeout: 5000,
-    forceCloseConnections: 'idle',
+    forceCloseConnections: 'idle'
   });
-  const app = await NestFactory.create<NestFastifyApplication>(
-    GatewayModule.register(config),
-    adapter,
-    { bodyParser: false, logger: false, abortOnError: false },
-  );
+  const app = await NestFactory.create<NestFastifyApplication>(GatewayModule.register(config), adapter, {
+    bodyParser: false,
+    logger: false,
+    abortOnError: false
+  });
   try {
     await app.init();
     await app.get(GatewayTransport).configure();

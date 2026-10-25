@@ -25,7 +25,7 @@ main().catch((error: unknown) => {
   console.error(
     error instanceof Error && error.message.startsWith('Configuration:')
       ? error.message
-      : 'Gateway startup failed. Check configuration and port availability.',
+      : 'Gateway startup failed. Check configuration and port availability.'
   );
   process.exitCode = 1;
 });

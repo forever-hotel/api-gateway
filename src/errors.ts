@@ -8,14 +8,5 @@ export class GatewayError extends Error {
   }
 }
 export const unavailable = () =>
-  new GatewayError(
-    503,
-    'SERVICE_UNAVAILABLE',
-    'Service temporarily unavailable. Please retry.',
-  );
-export const forbidden = () =>
-  new GatewayError(
-    403,
-    'FORBIDDEN',
-    'You do not have permission for this request.',
-  );
+  new GatewayError(503, 'SERVICE_UNAVAILABLE', 'Service temporarily unavailable. Please retry.');
+export const forbidden = () => new GatewayError(403, 'FORBIDDEN', 'You do not have permission for this request.');

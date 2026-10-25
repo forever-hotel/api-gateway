@@ -7,11 +7,8 @@ export class GatewayModule {
   static register(config: Config): DynamicModule {
     return {
       module: GatewayModule,
-      providers: [
-        { provide: GATEWAY_CONFIG, useValue: config },
-        GatewayTransport,
-      ],
-      exports: [GatewayTransport],
+      providers: [{ provide: GATEWAY_CONFIG, useValue: config }, GatewayTransport],
+      exports: [GatewayTransport]
     };
   }
 }
