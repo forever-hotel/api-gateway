@@ -30,6 +30,72 @@ test('HW forwards PayHere form notifications byte-for-byte without guest authent
     'application/x-www-form-urlencoded',
   );
 });
+test('shipped HW routes preserve booking contract paths, identity, request keys and JSON bodies', async (t) => {
+  const shippedRoutes: unknown = JSON.parse(
+    readFileSync('config/routes.json', 'utf8'),
+  );
+  const { app, calls } = await fixture(t, {}, shippedRoutes);
+  const id = '11111111-1111-4111-8111-111111111111';
+  for (const path of [
+    '/room-types',
+    '/availability?roomTypeId=' +
+      id +
+      '&checkInDate=2099-12-10&checkOutDate=2099-12-12&numberOfGuests=2',
+    '/promotions?limit=20',
+    '/bookings?category=upcoming&page=1',
+    `/bookings/${id}/management`,
+    `/payments/${id}`,
+  ]) {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/hw' + path,
+      headers: { authorization: 'Bearer contract-fixture-token' },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(calls.at(-1)?.service, 'hw');
+    assert.equal(calls.at(-1)?.path, path);
+    assert.equal(
+      calls.at(-1)?.headers.authorization,
+      'Bearer contract-fixture-token',
+    );
+  }
+  for (const [path, body] of [
+    [
+      '/booking-quotes',
+      {
+        roomTypeId: id,
+        checkInDate: '2099-12-10',
+        checkOutDate: '2099-12-12',
+        numberOfGuests: 2,
+      },
+    ],
+    [`/bookings/${id}/changes`, { quoteToken: 'signed.fixture' }],
+    [`/bookings/${id}/cancellations`, { revision: 1 }],
+  ] as const) {
+    const payload = JSON.stringify(body);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/hw' + path,
+      headers: {
+        authorization: 'Bearer contract-fixture-token',
+        'idempotency-key': 'contract-stable-request',
+        'content-type': 'application/json',
+      },
+      payload,
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(calls.at(-1)?.path, path);
+    assert.equal(calls.at(-1)?.body, payload);
+    assert.equal(
+      calls.at(-1)?.headers.authorization,
+      'Bearer contract-fixture-token',
+    );
+    assert.equal(
+      calls.at(-1)?.headers['idempotency-key'],
+      'contract-stable-request',
+    );
+  }
+});
 async function server(
   t: TestContext,
   handler: (req: IncomingMessage, res: ServerResponse) => void,
