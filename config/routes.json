@@ -5,10 +5,7 @@
     "prefix": "/mad/auth",
     "rewritePrefix": "/auth",
     "upstreamEnv": "MAD_SERVICE_URL",
-    "cookieNames": [
-      "mad_session",
-      "mad_csrf"
-    ]
+    "cookieNames": ["mad_session", "mad_csrf"]
   },
   {
     "id": "mad",
@@ -16,10 +13,7 @@
     "prefix": "/mad",
     "rewritePrefix": "/mad",
     "upstreamEnv": "MAD_SERVICE_URL",
-    "cookieNames": [
-      "mad_session",
-      "mad_csrf"
-    ]
+    "cookieNames": ["mad_session", "mad_csrf"]
   },
   {
     "id": "hw",
@@ -27,10 +21,7 @@
     "prefix": "/hw",
     "rewritePrefix": "",
     "upstreamEnv": "HW_SERVICE_URL",
-    "cookieNames": [
-      "hw_session",
-      "hw_csrf"
-    ]
+    "cookieNames": ["hw_session", "hw_csrf"]
   },
   {
     "id": "fds",
@@ -38,10 +29,7 @@
     "prefix": "/fds",
     "rewritePrefix": "",
     "upstreamEnv": "FDS_SERVICE_URL",
-    "cookieNames": [
-      "fds_session",
-      "fds_csrf"
-    ]
+    "cookieNames": ["fds_session", "fds_csrf"]
   },
   {
     "id": "foss",
@@ -49,10 +37,7 @@
     "prefix": "/foss",
     "rewritePrefix": "/foss",
     "upstreamEnv": "FOSS_SERVICE_URL",
-    "cookieNames": [
-      "foss_session",
-      "foss_csrf"
-    ]
+    "cookieNames": ["foss_session", "foss_csrf"]
   },
   {
     "id": "kms",
@@ -60,10 +45,7 @@
     "prefix": "/kms",
     "rewritePrefix": "/kms",
     "upstreamEnv": "KMS_SERVICE_URL",
-    "cookieNames": [
-      "kms_session",
-      "kms_csrf"
-    ]
+    "cookieNames": ["kms_session", "kms_csrf"]
   },
   {
     "id": "wkms",
@@ -71,9 +53,6 @@
     "prefix": "/wkms",
     "rewritePrefix": "/wkms",
     "upstreamEnv": "WKMS_SERVICE_URL",
-    "cookieNames": [
-      "wkms_session",
-      "wkms_csrf"
-    ]
+    "cookieNames": ["wkms_session", "wkms_csrf"]
   }
 ]

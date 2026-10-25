@@ -30,14 +30,14 @@ so a dashboard clone alone does not supply the gateway code.
 
 ## Default routing
 
-| Subsystem | Environment variable | Example backend port | Public prefix | Cookie names |
-| --- | --- | --- | --- | --- |
-| MAD | MAD_SERVICE_URL | 4000 | /mad | mad_session, mad_csrf |
-| HW | HW_SERVICE_URL | 4100 | /hw | hw_session, hw_csrf |
-| FDS | FDS_SERVICE_URL | 4200 | /fds | fds_session, fds_csrf |
-| FOSS | FOSS_SERVICE_URL | 4300 | /foss | foss_session, foss_csrf |
-| KMS | KMS_SERVICE_URL | 4500 | /kms | kms_session, kms_csrf |
-| WKMS | WKMS_SERVICE_URL | 4600 | /wkms | wkms_session, wkms_csrf |
+| Subsystem | Environment variable | Example backend port | Public prefix | Cookie names            |
+| --------- | -------------------- | -------------------- | ------------- | ----------------------- |
+| MAD       | MAD_SERVICE_URL      | 4000                 | /mad          | mad_session, mad_csrf   |
+| HW        | HW_SERVICE_URL       | 4100                 | /hw           | hw_session, hw_csrf     |
+| FDS       | FDS_SERVICE_URL      | 4200                 | /fds          | fds_session, fds_csrf   |
+| FOSS      | FOSS_SERVICE_URL     | 4300                 | /foss         | foss_session, foss_csrf |
+| KMS       | KMS_SERVICE_URL      | 4500                 | /kms          | kms_session, kms_csrf   |
+| WKMS      | WKMS_SERVICE_URL     | 4600                 | /wkms         | wkms_session, wkms_csrf |
 
 All six are enabled in config/routes.json. Ports are examples; replace them
 with each team's actual service addresses. General routes preserve their prefix.
@@ -181,22 +181,22 @@ on a shared browser origin.
 
 ## Configuration reference
 
-| Setting | Default/example | Purpose |
-| --- | --- | --- |
-| HOST / PORT | 127.0.0.1 / 8080 | Listener; containers set HOST=0.0.0.0 |
-| NODE_ENV | development | Production requires HTTPS allowed origins |
-| LOG_LEVEL | info | Structured operational logging |
-| *_SERVICE_URL | See route table | Required for enabled route destinations |
-| ALLOWED_ORIGINS | Exact frontend origins | Comma-separated; no wildcard |
-| ROUTES_FILE | config/routes.json | Relative to working directory unless absolute |
-| TRUSTED_PROXIES | Empty | Explicit trusted proxy IPs/CIDRs |
-| RATE_LIMIT_MAX | 120 | Per-process client-IP window threshold |
-| LOGIN_RATE_LIMIT_MAX | 10 | Lower threshold for paths ending /login |
-| RATE_LIMIT_WINDOW_MS | 60000 | Rate window duration |
-| BODY_LIMIT_BYTES | 1048576 | Buffered request limit |
-| RESPONSE_LIMIT_BYTES | 10485760 | Buffered response limit |
-| UPSTREAM_TIMEOUT_MS | 4000 | Request/response-reading deadline |
-| HEALTH_TIMEOUT_MS | 2000 | Readiness probe deadline per backend |
+| Setting              | Default/example        | Purpose                                       |
+| -------------------- | ---------------------- | --------------------------------------------- |
+| HOST / PORT          | 127.0.0.1 / 8080       | Listener; containers set HOST=0.0.0.0         |
+| NODE_ENV             | development            | Production requires HTTPS allowed origins     |
+| LOG_LEVEL            | info                   | Structured operational logging                |
+| *_SERVICE_URL        | See route table        | Required for enabled route destinations       |
+| ALLOWED_ORIGINS      | Exact frontend origins | Comma-separated; no wildcard                  |
+| ROUTES_FILE          | config/routes.json     | Relative to working directory unless absolute |
+| TRUSTED_PROXIES      | Empty                  | Explicit trusted proxy IPs/CIDRs              |
+| RATE_LIMIT_MAX       | 120                    | Per-process client-IP window threshold        |
+| LOGIN_RATE_LIMIT_MAX | 10                     | Lower threshold for paths ending /login       |
+| RATE_LIMIT_WINDOW_MS | 60000                  | Rate window duration                          |
+| BODY_LIMIT_BYTES     | 1048576                | Buffered request limit                        |
+| RESPONSE_LIMIT_BYTES | 10485760               | Buffered response limit                       |
+| UPSTREAM_TIMEOUT_MS  | 4000                   | Request/response-reading deadline             |
+| HEALTH_TIMEOUT_MS    | 2000                   | Readiness probe deadline per backend          |
 
 Login, other requests and health probes share IP counters. A BFF may present one
 IP for many users. Account-level login protection still belongs in each backend.

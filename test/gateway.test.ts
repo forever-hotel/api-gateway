@@ -1,13 +1,101 @@
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { buildApp } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
 import type { Config } from '../src/config.ts';
 import { requestPath } from '../src/http.ts';
 import { readFileSync } from 'node:fs';
+
+test('HW forwards PayHere form notifications byte-for-byte without guest authentication', async (t) => {
+  const shippedRoutes: unknown = JSON.parse(
+    readFileSync('config/routes.json', 'utf8'),
+  );
+  const { app, calls } = await fixture(t, {}, shippedRoutes);
+  const payload =
+    'merchant_id=123456&order_id=fixture&payhere_amount=20000.00&status_code=2&md5sig=ABC%2B123';
+  const response = await app.inject({
+    method: 'POST',
+    url: '/hw/payments/payhere/notify',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    payload,
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(calls.at(-1)?.path, '/payments/payhere/notify');
+  assert.equal(calls.at(-1)?.body, payload);
+  assert.equal(
+    calls.at(-1)?.headers['content-type'],
+    'application/x-www-form-urlencoded',
+  );
+});
+test('shipped HW routes preserve booking contract paths, identity, request keys and JSON bodies', async (t) => {
+  const shippedRoutes: unknown = JSON.parse(
+    readFileSync('config/routes.json', 'utf8'),
+  );
+  const { app, calls } = await fixture(t, {}, shippedRoutes);
+  const id = '11111111-1111-4111-8111-111111111111';
+  for (const path of [
+    '/room-types',
+    '/availability?roomTypeId=' +
+      id +
+      '&checkInDate=2099-12-10&checkOutDate=2099-12-12&numberOfGuests=2',
+    '/promotions?limit=20',
+    '/bookings?category=upcoming&page=1',
+    `/bookings/${id}/management`,
+    `/payments/${id}`,
+  ]) {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/hw' + path,
+      headers: { authorization: 'Bearer contract-fixture-token' },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(calls.at(-1)?.service, 'hw');
+    assert.equal(calls.at(-1)?.path, path);
+    assert.equal(
+      calls.at(-1)?.headers.authorization,
+      'Bearer contract-fixture-token',
+    );
+  }
+  for (const [path, body] of [
+    [
+      '/booking-quotes',
+      {
+        roomTypeId: id,
+        checkInDate: '2099-12-10',
+        checkOutDate: '2099-12-12',
+        numberOfGuests: 2,
+      },
+    ],
+    [`/bookings/${id}/changes`, { quoteToken: 'signed.fixture' }],
+    [`/bookings/${id}/cancellations`, { revision: 1 }],
+  ] as const) {
+    const payload = JSON.stringify(body);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/hw' + path,
+      headers: {
+        authorization: 'Bearer contract-fixture-token',
+        'idempotency-key': 'contract-stable-request',
+        'content-type': 'application/json',
+      },
+      payload,
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(calls.at(-1)?.path, path);
+    assert.equal(calls.at(-1)?.body, payload);
+    assert.equal(
+      calls.at(-1)?.headers.authorization,
+      'Bearer contract-fixture-token',
+    );
+    assert.equal(
+      calls.at(-1)?.headers['idempotency-key'],
+      'contract-stable-request',
+    );
+  }
+});
 async function server(
   t: TestContext,
   handler: (req: IncomingMessage, res: ServerResponse) => void,
@@ -343,8 +431,42 @@ test('unknown/disabled routes and ambiguous paths never reach an upstream', asyn
     '/identity/login',
   ])
     assert.equal((await app.inject({ url })).statusCode, 404);
-  for (const url of ['/mad/%2e%2e/auth', '/mad//rooms'])
-    assert.equal((await app.inject({ url })).statusCode, 400);
+  // inject() uses WHATWG URL parsing, which normalizes encoded dot segments
+  // before the gateway sees them. Send the original HTTP request target instead.
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  const address = app.server.address();
+  assert.ok(address && typeof address === 'object');
+  for (const path of ['/mad/%2e%2e/auth', '/mad//rooms']) {
+    const response = await new Promise<{
+      status: number | undefined;
+      body: string;
+    }>((resolve, reject) => {
+      const incoming = httpRequest(
+        { hostname: '127.0.0.1', port: address.port, path, method: 'GET' },
+        (response) => {
+          let body = '';
+          response.setEncoding('utf8');
+          response.on('data', (chunk: string) => {
+            body += chunk;
+          });
+          response.on('error', reject);
+          response.on('end', () =>
+            resolve({ status: response.statusCode, body }),
+          );
+        },
+      );
+      incoming.on('error', reject);
+      incoming.setTimeout(5000, () =>
+        incoming.destroy(new Error('Raw-path test timed out')),
+      );
+      incoming.end();
+    });
+    assert.equal(response.status, 400, path);
+    assert.equal(
+      (JSON.parse(response.body) as { code: string }).code,
+      'VALIDATION_ERROR',
+    );
+  }
   assert.equal(calls.length, 0);
   assert.throws(() => requestPath('/mad/../auth'));
   assert.throws(() => requestPath('/mad\\auth'));
