@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { buildApp } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
@@ -431,8 +431,42 @@ test('unknown/disabled routes and ambiguous paths never reach an upstream', asyn
     '/identity/login',
   ])
     assert.equal((await app.inject({ url })).statusCode, 404);
-  for (const url of ['/mad/%2e%2e/auth', '/mad//rooms'])
-    assert.equal((await app.inject({ url })).statusCode, 400);
+  // inject() uses WHATWG URL parsing, which normalizes encoded dot segments
+  // before the gateway sees them. Send the original HTTP request target instead.
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  const address = app.server.address();
+  assert.ok(address && typeof address === 'object');
+  for (const path of ['/mad/%2e%2e/auth', '/mad//rooms']) {
+    const response = await new Promise<{
+      status: number | undefined;
+      body: string;
+    }>((resolve, reject) => {
+      const incoming = httpRequest(
+        { hostname: '127.0.0.1', port: address.port, path, method: 'GET' },
+        (response) => {
+          let body = '';
+          response.setEncoding('utf8');
+          response.on('data', (chunk: string) => {
+            body += chunk;
+          });
+          response.on('error', reject);
+          response.on('end', () =>
+            resolve({ status: response.statusCode, body }),
+          );
+        },
+      );
+      incoming.on('error', reject);
+      incoming.setTimeout(5000, () =>
+        incoming.destroy(new Error('Raw-path test timed out')),
+      );
+      incoming.end();
+    });
+    assert.equal(response.status, 400, path);
+    assert.equal(
+      (JSON.parse(response.body) as { code: string }).code,
+      'VALIDATION_ERROR',
+    );
+  }
   assert.equal(calls.length, 0);
   assert.throws(() => requestPath('/mad/../auth'));
   assert.throws(() => requestPath('/mad\\auth'));

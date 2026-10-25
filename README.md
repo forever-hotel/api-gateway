@@ -16,15 +16,15 @@ instructions, read [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md).
 
 All six subsystems are enabled. The example ports must match your actual backends.
 
-| Gateway path | Upstream path | Example port | Allowed cookie names |
-| --- | --- | --- | --- |
-| `/mad/auth/*` | `/auth/*` | 4000 | mad_session, mad_csrf |
-| `/mad/*` | `/mad/*` | 4000 | mad_session, mad_csrf |
-| `/hw/*` | `/*` | 4100 | hw_session, hw_csrf |
-| `/fds/*` | `/*` | 4200 | fds_session, fds_csrf |
-| `/foss/*` | `/foss/*` | 4300 | foss_session, foss_csrf |
-| `/kms/*` | `/kms/*` | 4500 | kms_session, kms_csrf |
-| `/wkms/*` | `/wkms/*` | 4600 | wkms_session, wkms_csrf |
+| Gateway path  | Upstream path | Example port | Allowed cookie names    |
+| ------------- | ------------- | ------------ | ----------------------- |
+| `/mad/auth/*` | `/auth/*`     | 4000         | mad_session, mad_csrf   |
+| `/mad/*`      | `/mad/*`      | 4000         | mad_session, mad_csrf   |
+| `/hw/*`       | `/*`          | 4100         | hw_session, hw_csrf     |
+| `/fds/*`      | `/*`          | 4200         | fds_session, fds_csrf   |
+| `/foss/*`     | `/foss/*`     | 4300         | foss_session, foss_csrf |
+| `/kms/*`      | `/kms/*`      | 4500         | kms_session, kms_csrf   |
+| `/wkms/*`     | `/wkms/*`     | 4600         | wkms_session, wkms_csrf |
 
 The longest prefix wins. There is no shared /auth or /identity route.
 Confirm each backend's paths and update rewritePrefix as needed. Enabling routes

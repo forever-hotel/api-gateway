@@ -19,28 +19,28 @@ Authorization transport. Existing backends and frontends must be adapted by thei
 owners if they still depend on another authentication architecture. Enabling a
 gateway route does not complete those changes.
 
-| Owner | Responsibilities |
-| --- | --- |
-| Gateway team | Route destinations, cookie allowlists, CORS, limits, TLS and operational logs |
-| Each backend team | Login, credential storage, session/token validation, roles, CSRF, logout and readiness |
-| Each frontend/BFF team | Subsystem API paths, credentials, CSRF transport and session UI |
+| Owner                  | Responsibilities                                                                       |
+| ---------------------- | -------------------------------------------------------------------------------------- |
+| Gateway team           | Route destinations, cookie allowlists, CORS, limits, TLS and operational logs          |
+| Each backend team      | Login, credential storage, session/token validation, roles, CSRF, logout and readiness |
+| Each frontend/BFF team | Subsystem API paths, credentials, CSRF transport and session UI                        |
 
 ## Repository and ownership
 
-| Path | Purpose |
-| --- | --- |
-| src/config.ts | Environment, prefix and cookie-name validation |
-| src/app.ts | Forwarding, limits, CORS, health, logs |
-| src/cookies.ts | Subsystem cookie filtering and response scope |
-| src/http.ts | Canonical paths and bounded responses |
-| src/errors.ts | Safe transport errors |
-| src/server.ts | Startup and graceful shutdown |
-| config/routes.json | Enabled routes and cookie names |
-| test/gateway.test.ts | Isolated provider tests |
-| compose.yaml | Local gateway only |
-| compose.production.yaml | Gateway and Caddy HTTPS edge |
-| deploy/Caddyfile | TLS and trusted forwarding headers |
-| .github/workflows/ci.yml | CI after transfer to its own repository |
+| Path                     | Purpose                                        |
+| ------------------------ | ---------------------------------------------- |
+| src/config.ts            | Environment, prefix and cookie-name validation |
+| src/app.ts               | Forwarding, limits, CORS, health, logs         |
+| src/cookies.ts           | Subsystem cookie filtering and response scope  |
+| src/http.ts              | Canonical paths and bounded responses          |
+| src/errors.ts            | Safe transport errors                          |
+| src/server.ts            | Startup and graceful shutdown                  |
+| config/routes.json       | Enabled routes and cookie names                |
+| test/gateway.test.ts     | Isolated provider tests                        |
+| compose.yaml             | Local gateway only                             |
+| compose.production.yaml  | Gateway and Caddy HTTPS edge                   |
+| deploy/Caddyfile         | TLS and trusted forwarding headers             |
+| .github/workflows/ci.yml | CI after transfer to its own repository        |
 
 Copy the folder with dotfiles and lockfile. Exclude node_modules, .npm-cache, dist,
 .test-build, coverage, logs and actual environment files. Do not copy the parent
@@ -51,27 +51,27 @@ the nested CI workflow becomes active only when copied to a repository root.
 
 Configuration loads once at startup. Restart after environment or route changes.
 
-| Variable | Default/example | Purpose |
-| --- | --- | --- |
-| NODE_ENV | development | Production requires HTTPS frontend origins |
-| HOST / PORT | 127.0.0.1 / 8080 | Containers override host to 0.0.0.0 |
-| LOG_LEVEL | info | fatal, error, warn, info, debug, silent |
-| MAD_SERVICE_URL | http://localhost:4000 | MAD origin |
-| HW_SERVICE_URL | http://localhost:4100 | HW origin |
-| FDS_SERVICE_URL | http://localhost:4200 | FDS origin |
-| FOSS_SERVICE_URL | http://localhost:4300 | FOSS origin |
-| KMS_SERVICE_URL | http://localhost:4500 | KMS origin |
-| WKMS_SERVICE_URL | http://localhost:4600 | WKMS origin |
-| ALLOWED_ORIGINS | localhost ports 3000–3005 | Exact frontend origins; sample ports only |
-| TRUSTED_PROXIES | Empty | Trusted immediate proxy IPs/CIDRs |
-| RATE_LIMIT_MAX | 120 | Per-process client-IP request threshold |
-| LOGIN_RATE_LIMIT_MAX | 10 | Lower threshold for paths ending /login |
-| RATE_LIMIT_WINDOW_MS | 60000 | Rate window |
-| BODY_LIMIT_BYTES | 1048576 | Buffered request limit |
-| RESPONSE_LIMIT_BYTES | 10485760 | Buffered response limit |
-| UPSTREAM_TIMEOUT_MS | 4000 | Request and response-reading deadline |
-| HEALTH_TIMEOUT_MS | 2000 | Each backend readiness deadline |
-| ROUTES_FILE | config/routes.json | Relative to gateway working directory |
+| Variable             | Default/example           | Purpose                                    |
+| -------------------- | ------------------------- | ------------------------------------------ |
+| NODE_ENV             | development               | Production requires HTTPS frontend origins |
+| HOST / PORT          | 127.0.0.1 / 8080          | Containers override host to 0.0.0.0        |
+| LOG_LEVEL            | info                      | fatal, error, warn, info, debug, silent    |
+| MAD_SERVICE_URL      | http://localhost:4000     | MAD origin                                 |
+| HW_SERVICE_URL       | http://localhost:4100     | HW origin                                  |
+| FDS_SERVICE_URL      | http://localhost:4200     | FDS origin                                 |
+| FOSS_SERVICE_URL     | http://localhost:4300     | FOSS origin                                |
+| KMS_SERVICE_URL      | http://localhost:4500     | KMS origin                                 |
+| WKMS_SERVICE_URL     | http://localhost:4600     | WKMS origin                                |
+| ALLOWED_ORIGINS      | localhost ports 3000–3005 | Exact frontend origins; sample ports only  |
+| TRUSTED_PROXIES      | Empty                     | Trusted immediate proxy IPs/CIDRs          |
+| RATE_LIMIT_MAX       | 120                       | Per-process client-IP request threshold    |
+| LOGIN_RATE_LIMIT_MAX | 10                        | Lower threshold for paths ending /login    |
+| RATE_LIMIT_WINDOW_MS | 60000                     | Rate window                                |
+| BODY_LIMIT_BYTES     | 1048576                   | Buffered request limit                     |
+| RESPONSE_LIMIT_BYTES | 10485760                  | Buffered response limit                    |
+| UPSTREAM_TIMEOUT_MS  | 4000                      | Request and response-reading deadline      |
+| HEALTH_TIMEOUT_MS    | 2000                      | Each backend readiness deadline            |
+| ROUTES_FILE          | config/routes.json        | Relative to gateway working directory      |
 
 All six routes are enabled, so all service URLs are required. Origins must be
 HTTP(S), with no credentials, path, query or fragment. Existing .env files are
@@ -134,16 +134,16 @@ Redirects other than 304 are rejected; writes are never automatically retried.
 
 Every subsystem team should supply the following integration details:
 
-| Contract item | Information to provide |
-| --- | --- |
-| Destination | Local and production backend origins and service owner |
-| Routes | Public gateway prefix and actual backend authentication/business paths |
-| Health | Implementation of `GET /health/ready` and its dependency checks |
+| Contract item | Information to provide                                                     |
+| ------------- | -------------------------------------------------------------------------- |
+| Destination   | Local and production backend origins and service owner                     |
+| Routes        | Public gateway prefix and actual backend authentication/business paths     |
+| Health        | Implementation of `GET /health/ready` and its dependency checks            |
 | Login/session | Credential fields, response schema, session validation and expiry behavior |
-| Authorization | Public operations and backend-enforced roles/object permissions |
-| Cookies | Names, HttpOnly/SameSite settings, expiry and logout deletion |
-| CSRF | Token acquisition, write validation and allowed frontend origins |
-| Frontend/BFF | Direct browser or server-side API calls and credential forwarding |
+| Authorization | Public operations and backend-enforced roles/object permissions            |
+| Cookies       | Names, HttpOnly/SameSite settings, expiry and logout deletion              |
+| CSRF          | Token acquisition, write validation and allowed frontend origins           |
+| Frontend/BFF  | Direct browser or server-side API calls and credential forwarding          |
 
 All services are enabled in the supplied route file, but must be provided and
 run independently. Confirm these contracts before connecting production traffic.
@@ -152,14 +152,14 @@ run independently. Confirm these contracts before connecting production traffic.
 
 Default cookie allowlists:
 
-| Subsystem | Names | Public cookie path |
-| --- | --- | --- |
-| MAD | mad_session, mad_csrf | /mad |
-| HW | hw_session, hw_csrf | /hw |
-| FDS | fds_session, fds_csrf | /fds |
-| FOSS | foss_session, foss_csrf | /foss |
-| KMS | kms_session, kms_csrf | /kms |
-| WKMS | wkms_session, wkms_csrf | /wkms |
+| Subsystem | Names                   | Public cookie path |
+| --------- | ----------------------- | ------------------ |
+| MAD       | mad_session, mad_csrf   | /mad               |
+| HW        | hw_session, hw_csrf     | /hw                |
+| FDS       | fds_session, fds_csrf   | /fds               |
+| FOSS      | foss_session, foss_csrf | /foss              |
+| KMS       | kms_session, kms_csrf   | /kms               |
+| WKMS      | wkms_session, wkms_csrf | /wkms              |
 
 Backend owners should use these names or change cookieNames to their actual names.
 An unlisted cookie is not forwarded in either direction. Names cannot overlap
@@ -222,11 +222,11 @@ The gateway provides no universal username/password payload or session response.
 
 For a BFF, choose the integration pattern that matches that subsystem:
 
-| Pattern | Frontend/BFF responsibilities |
-| --- | --- |
-| Browser calls gateway directly | Use `credentials: 'include'` for cookies or send Authorization; use the subsystem prefix and approved Origin |
-| BFF owns browser session | Keep its cookie at the frontend and forward the subsystem's API token in Authorization |
-| BFF relays backend cookies | Forward only that subsystem's cookies, a verified Origin for writes and CSRF headers; relay each Set-Cookie separately |
+| Pattern                        | Frontend/BFF responsibilities                                                                                          |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| Browser calls gateway directly | Use `credentials: 'include'` for cookies or send Authorization; use the subsystem prefix and approved Origin           |
+| BFF owns browser session       | Keep its cookie at the frontend and forward the subsystem's API token in Authorization                                 |
+| BFF relays backend cookies     | Forward only that subsystem's cookies, a verified Origin for writes and CSRF headers; relay each Set-Cookie separately |
 
 If a BFF relays cookies, account for the browser-visible hostname and path as
 well as the gateway path. For example, a frontend proxy at `/api/*` cannot
@@ -284,26 +284,25 @@ a ten-second forced deadline; the production example grants fifteen seconds.
 ## Monitoring and recovery
 
 /health/live reports process availability. /health/ready probes each distinct
-enabled upstream. With all six enabled, an absent backend makes readiness return
-503. This is expected until all backends are running; successful routes remain
+enabled upstream. With all six enabled, an absent backend makes readiness return 503. This is expected until all backends are running; successful routes remain
 independently callable. Probes do not prove login correctness.
 
 Access logs include request ID, route ID, method, status and duration.
 They omit URLs, query strings, headers, cookies and bodies. Correlate the generated
 X-Request-Id with subsystem logs; business audit trails remain upstream.
 
-| Symptom | Check |
-| --- | --- |
-| Startup error | Missing service URL, invalid origin, cookie-name overlap, route schema |
-| 401 | Backend session/token validation |
-| 403 | Unapproved/missing Origin for cookie writes, backend CSRF or permissions |
+| Symptom        | Check                                                                           |
+| -------------- | ------------------------------------------------------------------------------- |
+| Startup error  | Missing service URL, invalid origin, cookie-name overlap, route schema          |
+| 401            | Backend session/token validation                                                |
+| 403            | Unapproved/missing Origin for cookie writes, backend CSRF or permissions        |
 | Cookie missing | credentials: include, cookieNames, Domain/Path, SameSite/Secure, browser policy |
-| 404 | Prefix or backend path mismatch |
-| 413 | Gateway/Caddy body limit |
-| 429 | Local process IP quota, BFF/NAT traffic |
-| 502 | Redirect or oversized response |
-| 503 | Backend unavailable/5xx or failed readiness |
-| 504 | Backend timeout |
+| 404            | Prefix or backend path mismatch                                                 |
+| 413            | Gateway/Caddy body limit                                                        |
+| 429            | Local process IP quota, BFF/NAT traffic                                         |
+| 502            | Redirect or oversized response                                                  |
+| 503            | Backend unavailable/5xx or failed readiness                                     |
+| 504            | Backend timeout                                                                 |
 
 Alert on sustained errors, latency, quota pressure and TLS renewal failures.
 There is no Redis health dependency or gateway session store to recover.
