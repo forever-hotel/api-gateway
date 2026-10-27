@@ -3,6 +3,7 @@ import { isIP } from 'node:net';
 
 export const METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
 export interface Route {
+  websocket?: boolean;
   id: string;
   prefix: string;
   rewritePrefix: string;
@@ -94,11 +95,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, source?: unknow
     if (!item || typeof item !== 'object' || typeof item.enabled !== 'boolean') invalid('route enabled');
     if (
       Object.keys(item).some(
-        key => !['id', 'enabled', 'prefix', 'rewritePrefix', 'upstreamEnv', 'cookieNames'].includes(key)
+        key => !['id', 'enabled', 'prefix', 'rewritePrefix', 'upstreamEnv', 'cookieNames', 'websocket'].includes(key)
       )
     )
       invalid('route fields (only routing configuration is supported)');
     if (!item.enabled) continue;
+    if (item.websocket !== undefined && typeof item.websocket !== 'boolean') invalid('route websocket');
     if (
       typeof item.id !== 'string' ||
       !/^[a-z][a-z0-9-]*$/.test(item.id) ||
@@ -128,6 +130,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, source?: unknow
     )
       invalid('cookie names must be unique across subsystems');
     routes.push({
+      ...(item.websocket === true ? { websocket: true } : {}),
       id: item.id,
       prefix: item.prefix,
       rewritePrefix: item.rewritePrefix,

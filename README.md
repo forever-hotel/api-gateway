@@ -180,3 +180,17 @@ live subsystem services, so no database or application secrets are required.
 Copy this folder, including dotfiles and lockfile, into its own repository.
 Exclude node_modules, caches, generated output and actual environment files.
 The parent repository currently ignores api-gateway.
+
+
+### Shared WebSocket routing
+
+Enable the optional `shared-websocket` route in `config/routes.json` and set
+`WEBSOCKET_SERVICE_URL` to the shared service origin. `websocket: true` permits
+upgrades only on that configured route. `/realtime/socket.io` maps to
+`/socket.io` upstream; normal HTTP forwarding also supports Socket.IO polling.
+The proxy checks allowed origins and limits handshake attempts. Authentication,
+single-use tickets, session revocation and channel permissions belong to the
+shared service and each subsystem, not this gateway. Browser connections and
+subsequent messages remain proxied through the gateway. Other routes reject
+upgrades. The shared service's ticket issuer requires a private subsystem relay
+key; never put that key or a bearer token in a browser URL.

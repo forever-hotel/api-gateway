@@ -9,6 +9,7 @@ import { METHODS } from './config.ts';
 import { boundedBody, requestPath } from './http.ts';
 import { requestCookies, responseCookies } from './cookies.ts';
 import { GatewayError, forbidden, unavailable } from './errors.ts';
+import { websocketProxy } from './websocket-proxy.ts';
 
 const messages: Record<number, [string, string]> = {
   400: ['VALIDATION_ERROR', 'The request is invalid.'],
@@ -224,10 +225,7 @@ async function configureTransport(app: FastifyInstance, config: Config) {
       requestId: request.id
     })
   );
-  // This finite-response REST proxy does not implement WebSocket/CONNECT tunnels.
-  app.server.on('upgrade', (_request, socket) =>
-    socket.end('HTTP/1.1 501 Not Implemented\r\nConnection: close\r\n\r\n')
-  );
+  websocketProxy(app, config);
   app.server.on('connect', (_request, socket) =>
     socket.end('HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n')
   );
