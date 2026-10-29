@@ -71,9 +71,18 @@ async function configureTransport(app: FastifyInstance, config: Config) {
     exposedHeaders: ['X-Request-Id', 'Retry-After'],
     maxAge: 600
   });
+  const loginPath = (request: { method: string; url: string }) => {
+    const path = request.url.split('?')[0].replace(/\/+$/, '').toLowerCase();
+    return request.method === 'POST' && path.endsWith('/login') ? path : undefined;
+  };
   await app.register(rateLimit, {
     global: false,
-    max: request => (request.url.split('?')[0].endsWith('/login') ? config.loginMax : config.rateMax),
+    max: request => (loginPath(request) ? config.loginMax : config.rateMax),
+    // Login attempts must not share a counter with session checks, logout or dashboard requests.
+    keyGenerator: request => {
+      const path = loginPath(request);
+      return path ? request.ip + ':login:' + path : request.ip + ':general';
+    },
     timeWindow: config.windowMs,
     skipOnError: false,
     errorResponseBuilder: request => ({

@@ -307,6 +307,22 @@ test('login limits and downstream denials both consume the client quota', async 
   assert.equal((await app.inject({ url: '/mad/denied', remoteAddress: '127.0.0.2' })).statusCode, 401);
   assert.equal((await app.inject({ url: '/mad/denied', remoteAddress: '127.0.0.2' })).statusCode, 429);
 });
+test('dashboard traffic, logout and session validation do not consume the login quota', async t => {
+  const { app } = await fixture(t, { loginMax: 2, rateMax: 20 });
+  for (let index = 0; index < 6; index++) assert.equal((await app.inject({ url: '/mad/resource' })).statusCode, 200);
+  assert.equal((await app.inject({ method: 'POST', url: '/mad/auth/login' })).statusCode, 200);
+  assert.equal((await app.inject({ url: '/mad/auth/session' })).statusCode, 200);
+  assert.equal((await app.inject({ method: 'POST', url: '/mad/auth/logout' })).statusCode, 204);
+  assert.equal((await app.inject({ method: 'POST', url: '/mad/auth/login' })).statusCode, 200);
+  assert.equal((await app.inject({ method: 'POST', url: '/mad/auth/login' })).statusCode, 429);
+  assert.equal((await app.inject({ url: '/mad/resource' })).statusCode, 200);
+});
+test('login path case and trailing slash cannot create separate quotas', async t => {
+  const { app } = await fixture(t, { loginMax: 1, rateMax: 20 });
+  assert.equal((await app.inject({ method: 'POST', url: '/mad/auth/login' })).statusCode, 200);
+  assert.equal((await app.inject({ method: 'POST', url: '/mad/auth/LOGIN/' })).statusCode, 429);
+});
+
 test('CORS restricts origins and permits approved authorization preflight', async t => {
   const { app, calls } = await fixture(t);
   assert.equal(
