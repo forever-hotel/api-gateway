@@ -1,196 +1,92 @@
-# Forever Hotel API gateway
+# Forever Hotel API Gateway and Staff Authentication
 
-Shared NestJS application using the Fastify adapter for MAD, HW, FDS, FOSS, KMS
-and WKMS. This guide applies to every subsystem team. Each subsystem
-owns login, credentials, token/session validation, permissions and logout.
-The gateway routes requests and applies CORS, IP rate limits, body limits,
-timeouts and request IDs. It does not issue or validate JWTs.
+NestJS with Fastify. The gateway routes all six subsystem APIs, proxies the shared
+WebSocket endpoint, and owns staff login, JWT issuance/validation, session revocation
+and password changes. Guest/HW/FOSS authentication remains with its owner until an
+agreed guest contract is implemented.
 
-There is no Redis dependency or response cache. Rate counters use local process
-memory. Frontend offline caching belongs to the relevant subsystem.
+## Local configuration
 
-## Routes
+Use Node 22 and npm 10+. Copy `.env.example` to `.env`, configure the existing shared
+PostgreSQL/Neon database, JWT secret/issuer, service URLs and exact frontend origins.
+Set `STAFF_AUTH_ENABLED=true`. Run `npm ci --ignore-scripts`, `npm run build`, then
+`npm start`, or `npm run dev`. Disable routes for services that are not running.
+The parent MAD Compose definition supplies gateway settings from its root `.env`.
 
-All six subsystems are enabled. The example ports must match your actual backends.
+Existing `staff_users` and `mad_revoked_sessions` tables must already exist. The
+latter name is retained for compatibility, but now stores all staff revocations.
+No schema is created, altered or migrated by startup. Apply
+`sql/manager-password-reset.sql` manually before enabling email recovery. Grant
+only the gateway runtime role access to its reset records. Keep database passwords,
+JWT secrets, SendGrid keys and local `.env` files out of Git.
 
-| Gateway path  | Upstream path | Example port | Allowed cookie names    |
-| ------------- | ------------- | ------------ | ----------------------- |
-| `/mad/auth/*` | `/auth/*`     | 4000         | mad_session, mad_csrf   |
-| `/mad/*`      | `/mad/*`      | 4000         | mad_session, mad_csrf   |
-| `/hw/*`       | `/hw/*`       | 4100         | hw_session, hw_csrf     |
-| `/fds/*`      | `/*`          | 4200         | fds_session, fds_csrf   |
-| `/foss/*`     | `/foss/*`     | 4300         | foss_session, foss_csrf |
-| `/kms/*`      | `/kms/*`      | 4500         | kms_session, kms_csrf   |
-| `/wkms/*`     | `/wkms/*`     | 4600         | wkms_session, wkms_csrf |
+## Staff authentication API
 
-The longest prefix wins. There is no shared /auth or /identity route.
-Confirm each backend's paths and update rewritePrefix as needed. Enabling routes
-does not create the subsystem implementations.
+All calls use JSON and HTTPS in deployment. Use an HttpOnly-cookie BFF, as MAD does,
+to keep tokens out of browser storage. The BFF supplies `Authorization: Bearer ...`.
+The gateway does not mint browser cookies itself. Cookie forwarding remains supported
+for owner-managed guest sessions; cookies alone do not authenticate central staff APIs.
 
-GET /health/live checks the gateway process. GET /health/ready checks every distinct
-enabled backend's /health/ready endpoint. It returns 503 if any backend is unavailable;
-other routes can still forward to their available backends.
+| Endpoint                            | Body / behavior                                                                 |
+| ----------------------------------- | ------------------------------------------------------------------------------- |
+| `POST /auth/login`                  | `username`, `password`, optional `subsystem` (`mad`, `fds`, `kms`, `wkms`)      |
+| `GET /auth/session`                 | Bearer token; current account state and expiry                                  |
+| `POST /auth/logout`                 | Bearer token; durable token revocation                                          |
+| `POST /auth/change-password`        | Bearer token, `currentPassword`, `newPassword`; own account only                |
+| `POST /auth/request-password-reset` | Manager `email`; generic response to avoid account enumeration                  |
+| `POST /auth/reset-password`         | Manager `email`, six-digit `code`, `newPassword`; invalidates existing sessions |
 
-**Front Desk (FDS) routing:** The gateway strips the `/fds` prefix before
-forwarding requests to the Front Desk backend. For example,
-`GET /fds/health/ready` is forwarded as `GET /health/ready`, and
-`GET /fds/bookings/arrivals?date=2026-10-08` is forwarded as
-`GET /bookings/arrivals?date=2026-10-08`.
+`/mad/auth/*` aliases enforce the manager role for login/session/change/logout and
+preserve MAD's existing BFF contract. Password recovery always targets active managers.
+Each subsystem keeps its own login screen but uses this shared API for staff credentials.
 
-This rewrite applies only to FDS. Other subsystem route mappings
-remain unchanged. Authentication and authorization are enforced
-by the Front Desk backend.
+Staff JWTs use HS256, an eight-hour lifetime and `forever-hotel-staff` audience. Existing
+MAD-audience tokens remain accepted until their original expiry if signed with the same
+configured key/issuer. Existing scrypt manager hashes and bcrypt cost-12 staff hashes are
+supported. New passwords use scrypt. Never change the key/issuer without planning a
+system-wide sign-out. All owner services must validate sessions against this gateway or
+use an agreed secure verification scheme; a role header supplied by a client is not trusted.
 
-## Local setup (PowerShell)
+Default staff route permissions: MAD=Manager; FDS=Receptionist;
+KMS=Kitchen Staff/Kitchen Manager; WKMS=Worker. First-login sessions may change passwords
+but cannot call business APIs. Owner services retain business authorization checks.
+MAD's backend uses `AUTH_SERVICE_URL` to verify sessions on direct requests too.
+Guest route contracts, additional owner-role access and provider login wiring must be
+agreed with the respective teams before enabling their services.
 
-Use Node 22.14.x and npm 10+. Run inside this folder:
+## Manager recovery and email
 
-```powershell
-if (!(Test-Path .env)) { Copy-Item .env.example .env }
-npm.cmd ci --ignore-scripts
-npm.cmd run dev
-```
+Set `STAFF_EMAIL_ENABLED=true`, `SENDGRID_API_KEY` and a verified
+`SENDGRID_FROM_EMAIL`. A code expires after ten minutes, permits five wrong attempts,
+and is replaced no more than once per minute per account. Only a keyed hash is stored;
+the code is never logged. Reset is atomic and single-use and clears account lockout.
+It requires a password different from the current password; older password history
+is not retained. Successful recovery does not sign in automatically.
 
-Start each subsystem backend using its own repository's setup instructions.
-Set all six `*_SERVICE_URL` values and exact frontend `ALLOWED_ORIGINS` in .env.
-The example frontend ports 3000 through 3005 are placeholders. The gateway listens
-on port 8080. Existing .env files are not overwritten: copy the newly required
-service variables manually. No Redis or service on port 5000 is needed.
+SendGrid 202 means accepted by the provider, not confirmed inbox delivery. Check
+SendGrid Email Activity and the recipient inbox/spam folder. Provider failures produce
+a safe `manager_reset_email_not_accepted` log event; public responses remain generic.
+Staff creation/initial-credentials email remains owned by MAD's encrypted delivery queue.
 
-Remove obsolete REDIS_URL, JWT_SECRET, JWT_ISSUER, AUTH_SERVICE_URL, AUTH_API_URL
-and IDENTITY_SERVICE_URL from gateway deployment environments. Replace
-AUTH_TIMEOUT_MS with HEALTH_TIMEOUT_MS.
+## Routing, sockets and health
 
-For a compiled run, use npm run build followed by npm start.
+`config/routes.json` or `ROUTES_JSON` selects enabled upstreams and rewrite prefixes.
+The longest prefix wins. `/mad/auth/*` is handled locally when staff auth is enabled.
+`/auth` and `/health` are reserved. MAD preserves `/mad`, FDS strips `/fds`; review other
+owner mappings with each team. CORS, bounded bodies/responses, timeouts and separate
+login/recovery rate limits apply. There is no Redis or response cache. Per-IP counters
+are process-local; database-backed account lockout/reset limits survive restarts.
 
-```powershell
-docker compose up --build -d
-docker compose logs -f gateway
-docker compose down
-```
+Enable `/realtime` with `websocket:true` and set `WEBSOCKET_SERVICE_URL` for the shared
+Socket.IO service. It validates sessions using the gateway's session endpoint and enforces
+subscription roles. REST auth does not replace the socket ticket/handshake checks.
 
-Local Compose starts only the gateway and points the six routes at host services.
-It does not create backends or databases. Production Compose adds a Caddy HTTPS
-edge using the settings in `compose.production.yaml` and `deploy/Caddyfile`.
+`/health/live` checks the process. `/health/ready` checks the auth database (and reset
+table when email is enabled) and all enabled upstream readiness endpoints. Disabled
+services are excluded. Logs omit tokens, request bodies, credentials and email addresses.
 
-## Cookies and browser calls
+## Checks and handoff
 
-Both Cookie requests and Set-Cookie responses are supported. Each route's
-cookieNames list controls which cookies reach its backend and which it may set.
-Use the listed names in your subsystem, or update that list to match its actual
-cookie names. Names must be unique across subsystems.
-
-The gateway removes upstream Domain and normalizes Path to the subsystem root
-(`/<subsystem>` for its login and business routes). Multiple Set-Cookie headers stay separate.
-HttpOnly, SameSite, expiration and logout deletion attributes are preserved;
-SameSite defaults to Lax, and production adds Secure. Backends should mark
-session cookies HttpOnly. Cookies named __Host-* require Path=/ and are therefore
-not supported by this path-scoped design.
-
-Use the same request pattern for any subsystem. The path, login payload and
-response schema come from that subsystem's API contract:
-
-```javascript
-function createSubsystemClient(gatewayOrigin, subsystem) {
-  // subsystem: mad, hw, fds, foss, kms or wkms
-  const baseUrl = gatewayOrigin + '/' + subsystem;
-  return (path, options = {}) =>
-    fetch(baseUrl + path, { ...options, credentials: 'include' });
-}
-
-async function login(request, loginPath, credentials) {
-  // Supply the subsystem's documented path and credential fields.
-  return request(loginPath, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(credentials),
-  });
-}
-
-async function readResource(request, resourcePath) {
-  return request(resourcePath);
-}
-```
-
-The browser handles cookies; frontend JavaScript does not set the Cookie header.
-Requests from an unapproved Origin are rejected. Cookie-authenticated writes
-without Origin are also rejected, including server-to-server cookie calls.
-A BFF must forward a verified allowed Origin for such writes. X-CSRF-Token is
-allowed through CORS and forwarded; each subsystem validates its own CSRF tokens.
-Do not use GET/HEAD to modify state.
-
-Use frontend and API hosts under the same site where possible. Truly cross-site
-cookies need SameSite=None; Secure and can still be blocked by browser cookie
-policies. Credential forwarding does not create single sign-on.
-
-## Integration steps for every subsystem
-
-1. Select your prefix and service URL from the route table. Run the backend at
-   that origin and provide `GET /health/ready`.
-2. Compare the backend's real paths with `prefix` and `rewritePrefix` in
-   `config/routes.json`. If it exposes `/auth/*` separately from its business
-   prefix, add a more specific `/<subsystem>/auth` mapping to `/auth`.
-   The shipped MAD mapping is an existing example; the same configuration
-   pattern works for every subsystem.
-3. Implement login, token/session validation, permissions and logout in your
-   backend. Decide which operations are public; gateway routing does not enforce
-   endpoint authentication.
-4. Match backend cookie names to every applicable route's `cookieNames`, or use
-   Authorization headers. Implement CSRF checks for cookie-authenticated writes.
-5. Add your frontend's exact origin to `ALLOWED_ORIGINS`. Point API calls at
-   the gateway with your subsystem prefix and use the browser helper above.
-6. If the frontend uses a backend-for-frontend (BFF), update its upstream path
-   mapping and credential forwarding too. Changing only its API hostname may
-   leave old paths pointing at the wrong gateway endpoint.
-7. Verify login, protected reads/writes, expired sessions, access denial,
-   logout and health using your backend's real contracts.
-
-These steps are required independently for all six teams. Route availability does
-not establish that a subsystem's authentication or frontend integration is complete.
-Set `ROUTES_FILE` to select a different route file, or set `ROUTES_JSON` to an
-inline JSON route array. `ROUTES_JSON` takes precedence and supports read-only
-Compose containers without mounting a generated configuration file.
-
-## Verification and transfer
-
-Static checks:
-
-```powershell
-npm.cmd run typecheck
-npm.cmd run lint
-npm.cmd run format:check
-npm.cmd run build
-```
-
-Tests for you to run:
-
-```powershell
-npm.cmd test
-npm.cmd run test:cov
-```
-
-GitHub Actions runs on pushes and pull requests targeting `develop` or `main`.
-It installs dependencies without lifecycle scripts, checks types, lint and
-formatting, builds NestJS, runs the gateway behavior tests with coverage, and
-rejects high/critical dependency advisories. Coverage is uploaded as the
-`gateway-coverage` artifact (`coverage/lcov.info`). No deployment or container
-checks run in this workflow. The tests use local fixture servers rather than
-live subsystem services, so no database or application secrets are required.
-
-Copy this folder, including dotfiles and lockfile, into its own repository.
-Exclude node_modules, caches, generated output and actual environment files.
-The parent repository currently ignores api-gateway.
-
-
-### Shared WebSocket routing
-
-Enable the optional `shared-websocket` route in `config/routes.json` and set
-`WEBSOCKET_SERVICE_URL` to the shared service origin. `websocket: true` permits
-upgrades only on that configured route. `/realtime/socket.io` maps to
-`/socket.io` upstream; normal HTTP forwarding also supports Socket.IO polling.
-The proxy checks allowed origins and limits handshake attempts. Authentication,
-single-use tickets, session revocation and channel permissions belong to the
-shared service and each subsystem, not this gateway. Browser connections and
-subsequent messages remain proxied through the gateway. Other routes reject
-upgrades. The shared service's ticket issuer requires a private subsystem relay
-key; never put that key or a bearer token in a browser URL.
+`npm run typecheck`, `npm run lint`, `npm run format:check`, `npm run build` and
+`npm run test:cov` are the quality commands. The gateway is an independent Git repository:
+commit it separately from MAD. No SQL execution or deployment is part of an app build.

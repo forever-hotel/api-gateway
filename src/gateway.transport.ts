@@ -1,3 +1,5 @@
+import { registerStaffAuth, bearer } from './auth-routes.ts';
+import { staffPermissions } from './staff-auth.ts';
 import { Inject, Injectable } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import type { FastifyInstance } from 'fastify';
@@ -73,7 +75,10 @@ async function configureTransport(app: FastifyInstance, config: Config) {
   });
   const loginPath = (request: { method: string; url: string }) => {
     const path = request.url.split('?')[0].replace(/\/+$/, '').toLowerCase();
-    return request.method === 'POST' && path.endsWith('/login') ? path : undefined;
+    return request.method === 'POST' &&
+      ['/login', '/request-password-reset', '/reset-password'].some(suffix => path.endsWith(suffix))
+      ? path
+      : undefined;
   };
   await app.register(rateLimit, {
     global: false,
@@ -112,11 +117,21 @@ async function configureTransport(app: FastifyInstance, config: Config) {
   // Preserve exact bytes for downstream signature/body validation; bounded by Fastify.
   app.removeAllContentTypeParsers();
   app.addContentTypeParser('*', { parseAs: 'buffer' }, (_request, body, done) => done(null, body));
+  const staffAuth = config.staffAuth ? registerStaffAuth(app, config.staffAuth) : undefined;
   app.get('/health/live', async () => ({
     status: 'ok',
     service: 'forever-hotel-api-gateway'
   }));
   app.get('/health/ready', async () => {
+    if (staffAuth) {
+      await staffAuth.safely(() => staffAuth.database.query('SELECT worker_id FROM public.staff_users LIMIT 0'));
+      if (staffAuth.config.emailEnabled)
+        await staffAuth.safely(() =>
+          staffAuth.database.query(
+            'SELECT worker_id,code_hash,credential_version,expires_at,attempts FROM public.gateway_password_resets LIMIT 0'
+          )
+        );
+    }
     const upstreams = [...new Set(config.routes.map(route => route.upstream))];
     const checks = await Promise.all(
       upstreams.map(async upstream => {
@@ -162,6 +177,15 @@ async function configureTransport(app: FastifyInstance, config: Config) {
     handler: async (request, reply) => {
       const route = contexts.get(request)!;
       const { pathname, search } = requestPath(request.raw.url ?? '/');
+      const subsystem = pathname.split('/')[1];
+      const healthPath = pathname.slice(subsystem.length + 1);
+      if (
+        staffAuth &&
+        Object.hasOwn(staffPermissions, subsystem) &&
+        !['/health/live', '/health/ready'].includes(healthPath)
+      ) {
+        await staffAuth.safely(() => staffAuth.session(bearer(request), subsystem, false));
+      }
       const target = route.upstream + route.rewritePrefix + pathname.slice(route.prefix.length) + search;
       const headers = new Headers();
       for (const name of [
@@ -182,7 +206,7 @@ async function configureTransport(app: FastifyInstance, config: Config) {
       headers.set('x-forwarded-for', request.ip);
       const cookie = requestCookies(request.headers.cookie, route);
       if (cookie) headers.set('cookie', cookie);
-      // Authorization is opaque: only the destination service may validate it.
+      // Staff routes were authenticated above; owners still enforce business permissions.
       // Cookies are opaque and restricted to this subsystem's configured names.
       let response: Response;
       let body: Buffer;

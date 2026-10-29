@@ -9,6 +9,18 @@ jobs:
   gateway:
     name: Gateway checks
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: integration-only
+          POSTGRES_DB: gateway_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d gateway_test"
+          --health-interval 5s --health-timeout 3s --health-retries 15
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:integration-only@localhost:5432/gateway_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

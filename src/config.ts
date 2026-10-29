@@ -1,3 +1,4 @@
+import { staffAuthConfig, type StaffAuthConfig } from './staff-auth-config.ts';
 import { readFileSync } from 'node:fs';
 import { isIP } from 'node:net';
 
@@ -12,6 +13,7 @@ export interface Route {
   cookiePath: string;
 }
 export interface Config {
+  staffAuth?: StaffAuthConfig;
   production: boolean;
   host: string;
   port: number;
@@ -108,7 +110,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, source?: unknow
       !(item.rewritePrefix === '' || path(item.rewritePrefix))
     )
       invalid('route id/prefix');
-    if (item.prefix === '/health' || item.prefix.startsWith('/health/')) invalid('reserved health prefix');
+    if (
+      item.prefix === '/auth' ||
+      item.prefix.startsWith('/auth/') ||
+      item.prefix === '/health' ||
+      item.prefix.startsWith('/health/')
+    )
+      invalid('reserved health prefix');
     if (routes.some(route => route.id === item.id || route.prefix === item.prefix))
       invalid('duplicate route id/prefix');
     if (typeof item.upstreamEnv !== 'string' || !/^[A-Z_]+$/.test(item.upstreamEnv)) invalid('route upstreamEnv');
@@ -145,6 +153,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, source?: unknow
   const logLevel = env.LOG_LEVEL ?? 'info';
   if (!['fatal', 'error', 'warn', 'info', 'debug', 'silent'].includes(logLevel)) invalid('LOG_LEVEL');
   return {
+    staffAuth: staffAuthConfig(env),
     production,
     host: env.HOST || '127.0.0.1',
     port: integer('PORT', 8080, 1, 65535),
