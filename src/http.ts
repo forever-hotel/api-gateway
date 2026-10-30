@@ -5,9 +5,11 @@ export async function boundedBody(response: Response, limit: number): Promise<Bu
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
+
   try {
     while (true) {
       const { done, value } = await reader.read();
+
       if (done) break;
       size += value.length;
       if (size > limit) {

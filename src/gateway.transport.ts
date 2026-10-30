@@ -53,6 +53,7 @@ async function configureTransport(app: FastifyInstance, config: Config) {
           ? error.statusCode
           : 503;
     const [code, message] = messages[status] ?? messages[503];
+
     reply.code(status).send({
       code: error instanceof GatewayError ? error.code : code,
       message: error instanceof GatewayError ? error.message : message,
@@ -75,17 +76,20 @@ async function configureTransport(app: FastifyInstance, config: Config) {
   });
   const loginPath = (request: { method: string; url: string }) => {
     const path = request.url.split('?')[0].replace(/\/+$/, '').toLowerCase();
+
     return request.method === 'POST' &&
       ['/login', '/request-password-reset', '/reset-password'].some(suffix => path.endsWith(suffix))
       ? path
       : undefined;
   };
+
   await app.register(rateLimit, {
     global: false,
     max: request => (loginPath(request) ? config.loginMax : config.rateMax),
     // Login attempts must not share a counter with session checks, logout or dashboard requests.
     keyGenerator: request => {
       const path = loginPath(request);
+
       return path ? request.ip + ':login:' + path : request.ip + ':general';
     },
     timeWindow: config.windowMs,
@@ -105,6 +109,7 @@ async function configureTransport(app: FastifyInstance, config: Config) {
     const route = config.routes.find(
       candidate => pathname === candidate.prefix || pathname.startsWith(candidate.prefix + '/')
     );
+
     app.log.info({
       event: 'request_complete',
       requestId: request.id,
@@ -118,6 +123,7 @@ async function configureTransport(app: FastifyInstance, config: Config) {
   app.removeAllContentTypeParsers();
   app.addContentTypeParser('*', { parseAs: 'buffer' }, (_request, body, done) => done(null, body));
   const staffAuth = config.staffAuth ? registerStaffAuth(app, config.staffAuth) : undefined;
+
   app.get('/health/live', async () => ({
     status: 'ok',
     service: 'forever-hotel-api-gateway'
@@ -140,6 +146,7 @@ async function configureTransport(app: FastifyInstance, config: Config) {
             redirect: 'manual',
             signal: AbortSignal.timeout(config.healthTimeout)
           });
+
           await response.body?.cancel();
           return response.ok;
         } catch {
@@ -147,6 +154,7 @@ async function configureTransport(app: FastifyInstance, config: Config) {
         }
       })
     );
+
     if (checks.some(ok => !ok)) throw unavailable();
     return {
       status: 'ok',
@@ -163,6 +171,7 @@ async function configureTransport(app: FastifyInstance, config: Config) {
       const route = config.routes.find(
         candidate => pathname === candidate.prefix || pathname.startsWith(candidate.prefix + '/')
       );
+
       if (!route) throw new GatewayError(404, 'NOT_FOUND', messages[404][1]);
       // Browsers attach cookies automatically. Cookie-authenticated writes must
       // identify an approved origin; the subsystem still validates CSRF tokens.
@@ -179,6 +188,7 @@ async function configureTransport(app: FastifyInstance, config: Config) {
       const { pathname, search } = requestPath(request.raw.url ?? '/');
       const subsystem = pathname.split('/')[1];
       const healthPath = pathname.slice(subsystem.length + 1);
+
       if (
         staffAuth &&
         Object.hasOwn(staffPermissions, subsystem) &&
@@ -188,6 +198,7 @@ async function configureTransport(app: FastifyInstance, config: Config) {
       }
       const target = route.upstream + route.rewritePrefix + pathname.slice(route.prefix.length) + search;
       const headers = new Headers();
+
       for (const name of [
         'accept',
         'content-type',
@@ -200,11 +211,13 @@ async function configureTransport(app: FastifyInstance, config: Config) {
         'x-csrf-token'
       ]) {
         const value = request.headers[name];
+
         if (typeof value === 'string') headers.set(name, value);
       }
       headers.set('x-request-id', request.id);
       headers.set('x-forwarded-for', request.ip);
       const cookie = requestCookies(request.headers.cookie, route);
+
       if (cookie) headers.set('cookie', cookie);
       // Staff routes were authenticated above; owners still enforce business permissions.
       // Cookies are opaque and restricted to this subsystem's configured names.
@@ -215,6 +228,7 @@ async function configureTransport(app: FastifyInstance, config: Config) {
       const onClose = () => {
         if (!reply.raw.writableEnded) abort.abort();
       };
+
       reply.raw.once('close', onClose);
       try {
         response = await fetch(target, {
@@ -238,12 +252,15 @@ async function configureTransport(app: FastifyInstance, config: Config) {
         throw new GatewayError(502, 'BAD_GATEWAY', messages[502][1]);
       if (response.status >= 500) throw unavailable();
       const cookies = responseCookies(response.headers.getSetCookie(), route, config.production);
+
       if (cookies.length) reply.header('set-cookie', cookies);
       const retry = response.headers.get('retry-after');
+
       if (response.status === 429 && retry && /^\d{1,6}$/.test(retry)) reply.header('retry-after', retry);
       // Preserve subsystem login/session/validation errors, including 401/403.
       for (const name of ['content-type', 'etag', 'content-disposition', 'www-authenticate']) {
         const value = response.headers.get(name);
+
         if (value) reply.header(name, value);
       }
       return reply
@@ -264,4 +281,5 @@ async function configureTransport(app: FastifyInstance, config: Config) {
 
 import type { FastifyRequest } from 'fastify';
 import type { Route } from './config.ts';
+
 const contexts = new WeakMap<FastifyRequest, Route>();

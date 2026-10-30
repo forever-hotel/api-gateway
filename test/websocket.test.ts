@@ -4,12 +4,14 @@ import { createServer } from 'node:http';
 import { connect, type Socket } from 'node:net';
 import { buildApp } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
+
 test('only configured WebSocket routes proxy upgrades, origins and persistent tunnel bytes', async t => {
   let upstreamPath = '';
   const sockets = new Set<Socket>();
   const upstream = createServer((_request, response) => {
     response.end('{}');
   });
+
   upstream.on('upgrade', (request, socket) => {
     sockets.add(socket as Socket);
     socket.on('close', () => sockets.delete(socket as Socket));
@@ -21,12 +23,14 @@ test('only configured WebSocket routes proxy upgrades, origins and persistent tu
   });
   await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve));
   const address = upstream.address();
+
   if (!address || typeof address === 'string') throw new Error();
   const config = loadConfig(
     { NODE_ENV: 'test', ALLOWED_ORIGINS: 'http://localhost:3000', WS_URL: `http://127.0.0.1:${address.port}` },
     [{ id: 'shared', enabled: true, prefix: '/realtime', rewritePrefix: '', upstreamEnv: 'WS_URL', websocket: true }]
   );
   const app = await buildApp(config, false);
+
   await app.listen(0, '127.0.0.1');
   t.after(async () => {
     await app.close();
@@ -43,6 +47,7 @@ test('only configured WebSocket routes proxy upgrades, origins and persistent tu
         socket.destroy();
         reject(new Error('Upgrade timeout'));
       }, 5000);
+
       socket.on('connect', () =>
         socket.write(
           `GET ${path} HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nOrigin: ${origin}\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n`

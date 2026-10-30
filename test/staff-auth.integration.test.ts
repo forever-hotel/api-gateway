@@ -14,11 +14,14 @@ test(
   { skip: !process.env.TEST_DATABASE_URL, timeout: 60000 },
   async t => {
     const url = process.env.TEST_DATABASE_URL!;
+
     assert.ok(new URL(url).pathname.includes('test'), 'Only a disposable test database is allowed');
     const admin = new Pool({ connectionString: url });
     const name = 'gateway_auth_test_' + randomUUID().replaceAll('-', '');
+
     await admin.query('CREATE DATABASE "' + name + '"');
     const isolated = new URL(url);
+
     isolated.pathname = '/' + name;
     const config = {
       databaseUrl: isolated.toString(),
@@ -30,6 +33,7 @@ test(
       sender: 'sender@example.invalid'
     };
     const auth = new StaffAuth(config);
+
     t.after(async () => {
       await auth.database.end();
       await admin.query('DROP DATABASE "' + name + '" WITH (FORCE)');
@@ -41,6 +45,7 @@ test(
     await auth.database.query(readFileSync('sql/manager-password-reset.sql', 'utf8'));
     const password = 'initial-private-password';
     const ids = new Map<string, string>();
+
     for (const [role, subsystem] of [
       ['MANAGER', 'mad'],
       ['RECEPTIONIST', 'fds'],
@@ -49,6 +54,7 @@ test(
       ['KITCHEN_MANAGER', 'kms']
     ]) {
       const id = randomUUID();
+
       ids.set(role, id);
       await auth.database.query(
         'INSERT INTO public.staff_users(worker_id,username,email,password_hash,role,password_change_required) VALUES($1,$2,$3,$4,$5,true)',
@@ -61,18 +67,21 @@ test(
         ]
       );
       const login = await auth.login({ username: role.toLowerCase(), password }, subsystem);
+
       assert.equal(login.passwordChangeRequired, true);
       await assert.rejects(auth.session(login.accessToken, subsystem, false));
       const changed = await auth.changePassword(login.accessToken, {
         currentPassword: password,
         newPassword: 'changed-private-password'
       });
+
       assert.equal(changed.passwordChangeRequired, false);
       await assert.rejects(auth.session(login.accessToken));
       await auth.logout(changed.accessToken);
       await assert.rejects(auth.session(changed.accessToken));
     }
     const manager = await auth.login({ username: 'manager', password: 'changed-private-password' }, 'mad');
+
     await assert.rejects(
       auth.changePassword(manager.accessToken, {
         currentPassword: 'changed-private-password',
@@ -80,18 +89,23 @@ test(
       })
     );
     let code = '';
+
     t.mock.method(globalThis, 'fetch', async (_input: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as { content: { value: string }[] };
+
       code = body.content[0].value.match(/code is ([0-9]{6})/)![1];
       return new Response(null, { status: 202 });
     });
     await auth.requestReset('manager@example.invalid');
     assert.match(code, /^[0-9]{6}$/);
     const [{ code_hash }] = (await auth.database.query('SELECT code_hash FROM public.gateway_password_resets')).rows;
+
     assert.notEqual(code_hash, code);
     const body = { email: 'manager@example.invalid', code, newPassword: 'recovered-private-password' };
+
     await assert.rejects(auth.resetPassword({ ...body, newPassword: 'changed-private-password' }));
     const results = await Promise.allSettled([auth.resetPassword(body), auth.resetPassword(body)]);
+
     assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
     await assert.rejects(auth.session(manager.accessToken));
     await auth.login({ username: 'manager', password: body.newPassword }, 'mad');
@@ -99,10 +113,12 @@ test(
     await auth.requestReset('manager@example.invalid');
     const attemptsBody = { email: 'manager@example.invalid', code, newPassword: 'another-private-password' };
     const wrong = code === '000000' ? '111111' : '000000';
+
     for (let attempt = 0; attempt < 5; attempt++)
       await assert.rejects(auth.resetPassword({ ...attemptsBody, code: wrong }));
     await assert.rejects(auth.resetPassword(attemptsBody));
     const attempts = await auth.database.query('SELECT attempts FROM public.gateway_password_resets');
+
     assert.equal(attempts.rows[0].attempts, 5);
     await auth.database.query(
       "UPDATE public.gateway_password_resets SET attempts=0,created_at=now()-interval '12 minutes',expires_at=now()-interval '2 minutes'"
@@ -122,8 +138,10 @@ test(
       },
       false
     );
+
     t.after(() => gateway.close());
     const server = gateway.getHttpAdapter().getInstance();
+
     await server.ready();
     const logged = await server.inject({
       method: 'POST',
@@ -131,6 +149,7 @@ test(
       headers: { 'content-type': 'application/json' },
       payload: JSON.stringify({ username: 'manager', password: body.newPassword })
     });
+
     assert.equal(logged.statusCode, 200);
     assert.equal((await server.inject({ url: '/mad/analytics/overview' })).statusCode, 401);
   }

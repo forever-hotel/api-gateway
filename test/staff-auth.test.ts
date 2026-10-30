@@ -6,6 +6,7 @@ import { hash } from 'bcryptjs';
 import { StaffAuth, authBody } from '../src/staff-auth.ts';
 import { hashPassword, verifyPassword } from '../src/password.ts';
 import { staffAuthConfig, type StaffAuthConfig } from '../src/staff-auth-config.ts';
+
 const config: StaffAuthConfig = {
   databaseUrl: 'postgresql://unused:unused@localhost/test',
   ssl: false,
@@ -27,6 +28,7 @@ const account = {
   failed_attempts: 0,
   locked_until: null
 };
+
 function token(role = 'MANAGER', version = 0) {
   return new JwtService().sign(
     { sub: account.worker_id, role, ver: version, jti: randomUUID() },
@@ -41,6 +43,7 @@ function token(role = 'MANAGER', version = 0) {
 }
 test('password verifier accepts existing scrypt and bcrypt staff credentials', async () => {
   const password = 'existing-private-password';
+
   for (const encoded of [await hashPassword(password), await hash(password, 12)]) {
     assert.equal(await verifyPassword(password, encoded), true);
     assert.equal(await verifyPassword('wrong', encoded), false);
@@ -48,11 +51,13 @@ test('password verifier accepts existing scrypt and bcrypt staff credentials', a
 });
 test('central auth rejects malformed, expired, forged and wrong-audience tokens before database access', async t => {
   const auth = new StaffAuth(config);
+
   t.after(() => auth.database.end());
   t.mock.method(auth.database, 'query', async () => {
     throw new Error('Database must not be reached');
   });
   const jwt = new JwtService();
+
   for (const value of [
     'bad',
     token().slice(0, -8) + 'tampered',
@@ -70,8 +75,10 @@ test('central auth rejects malformed, expired, forged and wrong-audience tokens 
 });
 test('session checks current account state, version, subsystem role and first-login gate', async t => {
   const auth = new StaffAuth(config);
+
   t.after(() => auth.database.end());
   let rows: unknown[] = [account];
+
   t.mock.method(auth.database, 'query', async () => ({ rows }));
   assert.equal((await auth.session(token(), 'mad', false)).role, 'MANAGER');
   await assert.rejects(auth.session(token(), 'wkms'), error => (error as { status: number }).status === 403);
@@ -94,6 +101,7 @@ test('session checks current account state, version, subsystem role and first-lo
 });
 test('recovery fails closed when sending is not configured and rejects invalid input', async t => {
   const auth = new StaffAuth(config);
+
   t.after(() => auth.database.end());
   await assert.rejects(
     auth.requestReset('manager@example.invalid'),
@@ -137,6 +145,7 @@ test('auth configuration validates database parts, TLS and email settings', () =
     JWT_SECRET: config.secret,
     JWT_ISSUER: config.issuer
   };
+
   assert.equal(staffAuthConfig(base)?.ssl, false);
   assert.equal(
     staffAuthConfig({
@@ -166,6 +175,7 @@ test('auth configuration validates database parts, TLS and email settings', () =
 });
 test('login enforces account lockout, supported roles and matching credentials', async t => {
   const auth = new StaffAuth(config);
+
   t.after(() => auth.database.end());
   const password = 'private-test-password';
   let current: Record<string, unknown> | undefined = { ...account, password_hash: await hashPassword(password) };
@@ -177,6 +187,7 @@ test('login enforces account lockout, supported roles and matching credentials',
     },
     release: () => {}
   };
+
   t.mock.method(auth.database, 'connect', async () => client as never);
   assert.equal((await auth.login({ username: 'manager', password }, 'mad')).role, 'MANAGER');
   await assert.rejects(auth.login({ username: 'manager', password: 'wrong' }, 'mad'));
@@ -195,6 +206,7 @@ test('login enforces account lockout, supported roles and matching credentials',
 });
 test('provider/storage failures are sanitized while auth failures retain their status', async t => {
   const auth = new StaffAuth(config);
+
   t.after(() => auth.database.end());
   await assert.rejects(
     auth.safely(() => Promise.reject(new Error('private database credentials'))),

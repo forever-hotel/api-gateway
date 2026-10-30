@@ -25,6 +25,7 @@ export async function buildApp(config: Config, logging = true) {
     logger: false,
     abortOnError: false
   });
+
   try {
     await app.init();
     await app.get(GatewayTransport).configure();

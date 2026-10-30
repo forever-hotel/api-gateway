@@ -9,9 +9,11 @@ async function main() {
     if (closing) return;
     closing = true;
     const deadline = setTimeout(() => process.exit(1), 10000).unref();
+
     await app.close();
     clearTimeout(deadline);
   };
+
   process.on('SIGINT', () => {
     void stop();
   });
