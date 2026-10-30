@@ -251,13 +251,10 @@ async function configureTransport(app: FastifyInstance, config: Config) {
         .send(['HEAD'].includes(request.method) || [204, 304].includes(response.status) ? undefined : body);
     }
   });
-  app.setNotFoundHandler((request, reply) =>
-    reply.code(404).send({
-      code: 'NOT_FOUND',
-      message: messages[404][1],
-      requestId: request.id
-    })
-  );
+  app.setNotFoundHandler((request, reply) => {
+    requestPath(request.raw.url ?? '/');
+    return reply.code(404).send({ code: 'NOT_FOUND', message: messages[404][1], requestId: request.id });
+  });
   websocketProxy(app, config);
   app.server.on('connect', (_request, socket) =>
     socket.end('HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n')

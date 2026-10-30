@@ -18,7 +18,9 @@
     "format:check": "prettier --check .",
     "test": "npm run build:test && node --test .test-build/test/*.test.js",
     "build:test": "tsc -p tsconfig.test.json",
-    "test:cov": "npm run build:test && node -e \"require('node:fs').mkdirSync('coverage', { recursive: true })\" && node --test --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info .test-build/test/*.test.js"
+    "test:cov": "npm run build:test && node -e \"require('node:fs').mkdirSync('coverage', { recursive: true })\" && node --test --experimental-test-coverage --test-coverage-include=\".test-build/src/**\" --test-coverage-lines=80 --test-coverage-branches=80 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info .test-build/test/*.test.js",
+    "test:system": "npm run build:test && node --test .test-build/test/system.integration.js",
+    "test:performance": "npm run build:test && node test/performance-runner.mjs"
   },
   "dependencies": {
     "@fastify/cors": "11.3.0",

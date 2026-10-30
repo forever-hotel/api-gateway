@@ -90,3 +90,24 @@ services are excluded. Logs omit tokens, request bodies, credentials and email a
 `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm run build` and
 `npm run test:cov` are the quality commands. The gateway is an independent Git repository:
 commit it separately from MAD. No SQL execution or deployment is part of an app build.
+
+## Cross-service and performance verification
+
+`npm run test:system` requires disposable `TEST_DATABASE_URL` (database name containing
+`test`), `TEST_RABBITMQ_URL` (vhost `/mad_test`), and a built sibling MAD backend.
+Set `MAD_BACKEND_PATH` if the backend is not at `../backend`. This runs real central
+JWT validation, gateway socket proxying, subscription permissions, RabbitMQ delivery,
+redaction and logout invalidation. It never uses the normal application database URL.
+
+`npm run test:performance` runs the same isolated stack with 100 and 300 persistent
+sockets and one authenticated API request per client per second. The local smoke
+profile measures five seconds after five seconds of warm-up and enforces p95 <= 500ms,
+zero errors and realtime fanout within two seconds. Set `PERFORMANCE_WARMUP_ROUNDS=300` and `PERFORMANCE_ROUNDS=900`
+for 15-minute measured runs per profile on a dedicated test host. Local smoke results
+do not prove production capacity, monthly uptime, log retention, external service
+acceptance or UAT. Those require staging evidence and the relevant owners.
+
+MAD's cross-system CI checks out this repository's `main` by default. Set the MAD
+repository variable `GATEWAY_TEST_REF` to a gateway commit/branch when coordinating
+changes, and publish the gateway test changes before enabling that CI job. The CI
+checkout must have read access to both repositories.

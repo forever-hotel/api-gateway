@@ -126,3 +126,79 @@ test('staff auth configuration requires explicit strong signing and database set
     config.issuer
   );
 });
+
+test('auth configuration validates database parts, TLS and email settings', () => {
+  const base = {
+    STAFF_AUTH_ENABLED: 'true',
+    DB_HOST: 'localhost',
+    DB_USERNAME: 'test',
+    DB_PASSWORD: 'test',
+    DB_NAME: 'test',
+    JWT_SECRET: config.secret,
+    JWT_ISSUER: config.issuer
+  };
+  assert.equal(staffAuthConfig(base)?.ssl, false);
+  assert.equal(
+    staffAuthConfig({
+      ...base,
+      DB_SSL: 'true',
+      STAFF_EMAIL_ENABLED: 'true',
+      SENDGRID_API_KEY: 'test',
+      SENDGRID_FROM_EMAIL: 'sender@example.invalid'
+    })?.emailEnabled,
+    true
+  );
+  for (const key of ['DB_HOST', 'DB_USERNAME', 'DB_PASSWORD', 'DB_NAME'])
+    assert.throws(() => staffAuthConfig({ ...base, [key]: '' }));
+  for (const invalid of [
+    { DB_HOST: 'bad/host' },
+    { DB_PORT: '0' },
+    { DB_PORT: 'bad' },
+    { DB_PORT: '65536' },
+    { DB_SSL: 'yes' },
+    { STAFF_EMAIL_ENABLED: 'yes' },
+    { DATABASE_URL: 'https://db.invalid' },
+    { JWT_ISSUER: '' },
+    { STAFF_EMAIL_ENABLED: 'true' },
+    { STAFF_EMAIL_ENABLED: 'true', SENDGRID_API_KEY: 'test', SENDGRID_FROM_EMAIL: 'bad' }
+  ])
+    assert.throws(() => staffAuthConfig({ ...base, ...invalid }));
+});
+test('login enforces account lockout, supported roles and matching credentials', async t => {
+  const auth = new StaffAuth(config);
+  t.after(() => auth.database.end());
+  const password = 'private-test-password';
+  let current: Record<string, unknown> | undefined = { ...account, password_hash: await hashPassword(password) };
+  const queries: string[] = [];
+  const client = {
+    query: async (sql: string) => {
+      queries.push(sql);
+      return { rows: sql.startsWith('SELECT') && current ? [current] : [] };
+    },
+    release: () => {}
+  };
+  t.mock.method(auth.database, 'connect', async () => client as never);
+  assert.equal((await auth.login({ username: 'manager', password }, 'mad')).role, 'MANAGER');
+  await assert.rejects(auth.login({ username: 'manager', password: 'wrong' }, 'mad'));
+  assert.ok(queries.some(sql => sql.includes('failed_attempts=$2')));
+  for (const changed of [
+    { ...current, is_active: false },
+    { ...current, locked_until: new Date(Date.now() + 60000) },
+    { ...current, role: 'GUEST' },
+    undefined
+  ]) {
+    current = changed;
+    await assert.rejects(auth.login({ username: 'manager', password }, 'mad'));
+  }
+  await assert.rejects(auth.login({ username: '', password }));
+  await assert.rejects(auth.login({ username: 'manager', password }, 'unknown'));
+});
+test('provider/storage failures are sanitized while auth failures retain their status', async t => {
+  const auth = new StaffAuth(config);
+  t.after(() => auth.database.end());
+  await assert.rejects(
+    auth.safely(() => Promise.reject(new Error('private database credentials'))),
+    error => (error as Error).message.indexOf('private') < 0
+  );
+  await assert.rejects(auth.session('invalid'));
+});

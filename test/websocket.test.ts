@@ -1,15 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { connect } from 'node:net';
+import { connect, type Socket } from 'node:net';
 import { buildApp } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
 test('only configured WebSocket routes proxy upgrades, origins and persistent tunnel bytes', async t => {
   let upstreamPath = '';
+  const sockets = new Set<Socket>();
   const upstream = createServer((_request, response) => {
     response.end('{}');
   });
   upstream.on('upgrade', (request, socket) => {
+    sockets.add(socket as Socket);
+    socket.on('close', () => sockets.delete(socket as Socket));
     upstreamPath = request.url ?? '';
     socket.write(
       'HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: test\r\n\r\n'
@@ -27,6 +30,7 @@ test('only configured WebSocket routes proxy upgrades, origins and persistent tu
   await app.listen(0, '127.0.0.1');
   t.after(async () => {
     await app.close();
+    for (const socket of sockets) socket.destroy();
     await new Promise<void>(resolve => upstream.close(() => resolve()));
   });
   const port = new URL(await app.getUrl()).port;
