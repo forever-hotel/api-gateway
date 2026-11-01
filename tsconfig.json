@@ -9,7 +9,9 @@
     "verbatimModuleSyntax": true,
     "rewriteRelativeImportExtensions": true,
     "types": ["node"],
-    "outDir": "dist"
+    "outDir": "dist",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]
 }

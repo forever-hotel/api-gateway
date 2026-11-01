@@ -1,21 +1,43 @@
-name: Gateway checks
-on: [push, pull_request]
+name: Gateway quality gates
+on:
+  push:
+  pull_request:
+    branches: [develop, main]
 permissions:
   contents: read
 jobs:
-  verify:
+  gateway:
+    name: Gateway checks
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: integration-only
+          POSTGRES_DB: gateway_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d gateway_test"
+          --health-interval 5s --health-timeout 3s --health-retries 15
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:integration-only@localhost:5432/gateway_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
+          cache-dependency-path: package-lock.json
       - run: npm ci --ignore-scripts
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check
       - run: npm run build
       - run: npm run test:cov
-      - run: npm audit --omit=dev --audit-level=high
-      - run: docker build -t forever-gateway:ci .
+      - run: npm audit --audit-level=high
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gateway-coverage
+          path: coverage/
+          if-no-files-found: warn

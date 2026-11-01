@@ -1,5 +1,14 @@
 [
   {
+    "id": "shared-websocket",
+    "enabled": false,
+    "prefix": "/realtime",
+    "rewritePrefix": "",
+    "upstreamEnv": "WEBSOCKET_SERVICE_URL",
+    "websocket": true,
+    "cookieNames": []
+  },
+  {
     "id": "mad-auth",
     "enabled": true,
     "prefix": "/mad/auth",
