@@ -22,10 +22,16 @@ JWT secrets, SendGrid keys and local `.env` files out of Git.
 
 ## Staff authentication API
 
-All calls use JSON and HTTPS in deployment. Use an HttpOnly-cookie BFF, as MAD does,
-to keep tokens out of browser storage. The BFF supplies `Authorization: Bearer ...`.
-The gateway does not mint browser cookies itself. Cookie forwarding remains supported
-for owner-managed guest sessions; cookies alone do not authenticate central staff APIs.
+| Gateway path  | Upstream path | Example port | Allowed cookie names    |
+| ------------- | ------------- | ------------ | ----------------------- |
+| `/mad/auth/*` | `/auth/*`     | 4000         | mad_session, mad_csrf   |
+| `/mad/*`      | `/mad/*`      | 4000         | mad_session, mad_csrf   |
+| `/hw/*`       | `/*`          | 4100         | hw_session, hw_csrf     |
+| `/fds/*`      | `/*`          | 4200         | fds_session, fds_csrf   |
+| `/foss/*`     | `/foss/*`     | 4300         | foss_session, foss_csrf |
+| `/kms/*`      | `/kms/*`      | 4500         | kms_session, kms_csrf   |
+| `/wkms/*`     | `/wkms/*`     | 4600         | wkms_session, wkms_csrf |
+
 
 | Endpoint                            | Body / behavior                                                                 |
 | ----------------------------------- | ------------------------------------------------------------------------------- |
@@ -53,6 +59,7 @@ but cannot call business APIs. Owner services retain business authorization chec
 MAD's backend uses `AUTH_SERVICE_URL` to verify sessions on direct requests too.
 Guest route contracts, additional owner-role access and provider login wiring must be
 agreed with the respective teams before enabling their services.
+
 
 ## Manager recovery and email
 
@@ -107,7 +114,89 @@ for 15-minute measured runs per profile on a dedicated test host. Local smoke re
 do not prove production capacity, monthly uptime, log retention, external service
 acceptance or UAT. Those require staging evidence and the relevant owners.
 
-MAD's cross-system CI checks out this repository's `main` by default. Set the MAD
-repository variable `GATEWAY_TEST_REF` to a gateway commit/branch when coordinating
-changes, and publish the gateway test changes before enabling that CI job. The CI
-checkout must have read access to both repositories.
+```javascript
+function createSubsystemClient(gatewayOrigin, subsystem) {
+  // subsystem: mad, hw, fds, foss, kms or wkms
+  const baseUrl = gatewayOrigin + '/' + subsystem;
+  return (path, options = {}) =>
+    fetch(baseUrl + path, { ...options, credentials: 'include' });
+}
+
+async function login(request, loginPath, credentials) {
+  // Supply the subsystem's documented path and credential fields.
+  return request(loginPath, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(credentials),
+  });
+}
+
+async function readResource(request, resourcePath) {
+  return request(resourcePath);
+}
+```
+
+The browser handles cookies; frontend JavaScript does not set the Cookie header.
+Requests from an unapproved Origin are rejected. Cookie-authenticated writes
+without Origin are also rejected, including server-to-server cookie calls.
+A BFF must forward a verified allowed Origin for such writes. X-CSRF-Token is
+allowed through CORS and forwarded; each subsystem validates its own CSRF tokens.
+Do not use GET/HEAD to modify state.
+
+Use frontend and API hosts under the same site where possible. Truly cross-site
+cookies need SameSite=None; Secure and can still be blocked by browser cookie
+policies. Credential forwarding does not create single sign-on.
+
+## Integration steps for every subsystem
+
+1. Select your prefix and service URL from the route table. Run the backend at
+   that origin and provide `GET /health/ready`.
+2. Compare the backend's real paths with `prefix` and `rewritePrefix` in
+   `config/routes.json`. If it exposes `/auth/*` separately from its business
+   prefix, add a more specific `/<subsystem>/auth` mapping to `/auth`.
+   The shipped MAD mapping is an existing example; the same configuration
+   pattern works for every subsystem.
+3. Implement login, token/session validation, permissions and logout in your
+   backend. Decide which operations are public; gateway routing does not enforce
+   endpoint authentication.
+4. Match backend cookie names to every applicable route's `cookieNames`, or use
+   Authorization headers. Implement CSRF checks for cookie-authenticated writes.
+5. Add your frontend's exact origin to `ALLOWED_ORIGINS`. Point API calls at
+   the gateway with your subsystem prefix and use the browser helper above.
+6. If the frontend uses a backend-for-frontend (BFF), update its upstream path
+   mapping and credential forwarding too. Changing only its API hostname may
+   leave old paths pointing at the wrong gateway endpoint.
+7. Verify login, protected reads/writes, expired sessions, access denial,
+   logout and health using your backend's real contracts.
+
+These steps are required independently for all six teams. Route availability does
+not establish that a subsystem's authentication or frontend integration is complete.
+See [MAINTENANCE.md](MAINTENANCE.md) for route templates, BFF integration and the
+shared operating procedures.
+
+## Verification and transfer
+
+Static checks:
+
+```powershell
+npm.cmd run typecheck
+npm.cmd run lint
+npm.cmd run format:check
+npm.cmd run build
+```
+
+Tests for you to run:
+
+```powershell
+npm.cmd test
+npm.cmd run test:cov
+```
+
+Tests were updated but not run. See [TEST_REGISTER.md](TEST_REGISTER.md).
+Copy this folder, including dotfiles and lockfile, into its own repository.
+Exclude node_modules, caches, generated output and actual environment files.
+The parent repository currently ignores api-gateway.
+
+Hotel website integration: /hw/room-types, /hw/contact/enquiries, and
+/hw/guests/{register,login,me} forward to the same paths without /hw.
+Guest authentication uses the backend Authorization bearer token contract.
