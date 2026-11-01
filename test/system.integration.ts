@@ -1,4 +1,4 @@
-// Explicit cross-repository verification. Requires a built sibling MAD backend,
+// Explicit cross-repository verification. Requires built MAD and standalone WebSocket checkouts,
 // TEST_DATABASE_URL and TEST_RABBITMQ_URL pointing only at disposable services.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -31,7 +31,7 @@ test(
         ? ((Number(process.env.PERFORMANCE_ROUNDS ?? 5) + Number(process.env.PERFORMANCE_WARMUP_ROUNDS ?? 5)) * 2 +
             120) *
           1000
-        : 45000
+        : 120000 // Includes cold startup of three independent Nest dependency graphs.
   },
   async t => {
     const url = process.env.TEST_DATABASE_URL ?? '',
@@ -39,15 +39,23 @@ test(
 
     assert.ok(new URL(url).pathname.includes('test'));
     assert.equal(new URL(broker).pathname, '/mad_test');
-    const backend = resolve(process.env.MAD_BACKEND_PATH ?? '../backend');
+    const backend = resolve(process.env.MAD_BACKEND_PATH ?? '../mad/backend');
     const requireBackend = createRequire(resolve(backend, 'package.json'));
-    const { NestFactory } = requireBackend('@nestjs/core') as {
+    const websocket = resolve(process.env.SHARED_WEBSOCKET_PATH ?? '../websocket');
+    const requireWebsocket = createRequire(resolve(websocket, 'package.json'));
+    const expectedProtocol = requireBackend('./dist/realtime/relay-contracts.js') as object;
+    const sharedProtocol = requireWebsocket('./dist/contracts.js') as Record<string, unknown>;
+    assert.deepEqual(
+      Object.fromEntries(Object.keys(expectedProtocol).map(key => [key, sharedProtocol[key]])),
+      expectedProtocol
+    );
+    const { NestFactory } = requireWebsocket('@nestjs/core') as {
       NestFactory: { create(module: unknown, options: { logger: false }): Promise<SharedApp> };
     };
     const { ConfigService } = requireBackend('@nestjs/config') as {
       ConfigService: new (values: Record<string, string>) => unknown;
     };
-    const { io } = requireBackend('socket.io-client') as { io: (url: string, options: unknown) => ClientSocket };
+    const { io } = requireWebsocket('socket.io-client') as { io: (url: string, options: unknown) => ClientSocket };
     const admin = new Pool({ connectionString: url });
     const name = 'system_test_' + randomUUID().replaceAll('-', '');
 
@@ -126,17 +134,20 @@ test(
         roles: { MANAGER: ['rooms'] }
       }
     });
-    const { SharedWebsocketModule } = requireBackend('./dist/shared-websocket/main.js') as {
+    const { SharedWebsocketModule } = requireWebsocket('./dist/shared-websocket.module.js') as {
       SharedWebsocketModule: unknown;
     };
-    const { SharedBroker } = requireBackend('./dist/shared-websocket/shared-broker.service.js') as {
+    const { SharedBroker } = requireWebsocket('./dist/shared-broker.service.js') as {
       SharedBroker: unknown;
     };
+    t.diagnostic('standalone module loaded');
     const shared = await NestFactory.create(SharedWebsocketModule, { logger: false });
+    t.diagnostic('standalone Nest application created');
 
     resources.shared = shared;
     await shared.listen(0, '127.0.0.1');
     const sharedUrl = await shared.getUrl();
+    t.diagnostic('standalone service listening');
 
     config.routes[0].upstream = sharedUrl;
     const receiver = shared.get(SharedBroker) as { ready: boolean };
@@ -277,7 +288,7 @@ test(
 
     assert.equal(invalid.status, 401);
     const disconnected = new Promise(resolve => client!.once('disconnect', resolve));
-    const { SharedGateway } = requireBackend('./dist/shared-websocket/shared.gateway.js') as { SharedGateway: unknown };
+    const { SharedGateway } = requireWebsocket('./dist/shared.gateway.js') as { SharedGateway: unknown };
 
     await (shared.get(SharedGateway) as { revalidate(): Promise<void> }).revalidate();
     await disconnected;
