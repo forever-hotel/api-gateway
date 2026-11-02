@@ -1,7 +1,7 @@
 [
   {
     "id": "shared-websocket",
-    "enabled": false,
+    "enabled": true,
     "prefix": "/realtime",
     "rewritePrefix": "",
     "upstreamEnv": "WEBSOCKET_SERVICE_URL",

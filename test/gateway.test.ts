@@ -196,6 +196,7 @@ async function fixture(t: TestContext, overrides: Partial<Config> = {}, routeDef
   for (const id of ['mad', 'hw', 'fds', 'foss', 'kms', 'wkms']) {
     env[id.toUpperCase() + '_SERVICE_URL'] = await server(t, handler(id));
   }
+  env.WEBSOCKET_SERVICE_URL = await server(t, handler('shared-websocket'));
   const config = loadConfig(env, routeDefinitions);
 
   Object.assign(config, overrides);
@@ -529,7 +530,8 @@ test('configuration needs no JWT settings and rejects obsolete policy fields', (
       {
         ...env,
         NODE_ENV: 'production',
-        ALLOWED_ORIGINS: 'https://manager.example'
+        ALLOWED_ORIGINS: 'https://manager.example',
+        WEBSOCKET_SERVICE_URL: 'http://shared-websocket:8081'
       },
       madRoutes
     )
@@ -606,7 +608,8 @@ test('MAD login cookie scope also covers business routes and logout clears the s
 test('shipped routes enable all six subsystems without Redis', () => {
   const env: NodeJS.ProcessEnv = {
     NODE_ENV: 'production',
-    ALLOWED_ORIGINS: 'https://manager.example'
+    ALLOWED_ORIGINS: 'https://manager.example',
+    WEBSOCKET_SERVICE_URL: 'http://shared-websocket:8081'
   };
   const ids = ['mad', 'hw', 'fds', 'foss', 'kms', 'wkms'];
 
