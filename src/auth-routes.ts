@@ -52,10 +52,10 @@ export function registerStaffAuth(app: FastifyInstance, config: StaffAuthConfig)
       })
     );
     app.post(prefix + '/request-password-reset', request =>
-      auth.safely(() => auth.requestReset(authBody(request.body, ['email']).email))
+      auth.safely(() => auth.requestReset(authBody(request.body, ['email']).email, system))
     );
     app.post(prefix + '/reset-password', request =>
-      auth.safely(() => auth.resetPassword(authBody(request.body, ['email', 'code', 'newPassword'])))
+      auth.safely(() => auth.resetPassword(authBody(request.body, ['email', 'code', 'newPassword']), system))
     );
   }
   return auth;

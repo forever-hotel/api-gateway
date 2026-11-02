@@ -315,7 +315,8 @@ export class StaffAuth {
       .digest('hex');
   }
 
-  async requestReset(email: string) {
+  async requestReset(email: string, subsystem = 'mad') {
+    if (!staffPermissions[subsystem]) throw invalidInput();
     if (!email || email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
       throw invalidInput('Enter a valid email address.');
     if (!this.config.emailEnabled) throw unavailable();
@@ -323,8 +324,8 @@ export class StaffAuth {
     const challenge = randomUUID();
     const delivery = await this.transaction(async client => {
       const { rows } = await client.query<Account>(
-        "SELECT * FROM public.staff_users WHERE lower(email)=$1 AND (roles && ARRAY['MANAGER','ROOT']::text[]) AND is_active=true FOR UPDATE",
-        [email.trim().toLowerCase()]
+        'SELECT * FROM public.staff_users WHERE lower(email)=$1 AND (roles && $2::text[]) AND is_active=true FOR UPDATE',
+        [email.trim().toLowerCase(), ['ROOT', ...staffPermissions[subsystem]]]
       );
 
       if (!rows[0]) return null;
@@ -350,7 +351,7 @@ export class StaffAuth {
           body: JSON.stringify({
             to: [{ email: delivery.email }],
             sender: { email: this.config.sender },
-            subject: 'Forever Hotel manager password reset',
+            subject: 'Forever Hotel password reset',
             textContent: `Your password reset code is ${code}. It expires in 10 minutes. If you did not request this, ignore this email. Never share this code.`
           })
         });
@@ -362,18 +363,20 @@ export class StaffAuth {
           delivery.worker_id,
           challenge
         ]);
-        this.report('manager_reset_email_not_accepted');
+        this.report('staff_reset_email_not_accepted');
         // Return the same public response for unknown accounts and provider failures.
         // Provider delivery/activity is checked in Brevo, without exposing account existence.
       }
     }
     return {
       status: 'code_requested',
-      message: 'If an active manager account matches, a code will be emailed. Check your inbox and spam folder.'
+      message:
+        'If an active account with access to this system matches, a code will be emailed. Check your inbox and spam folder.'
     };
   }
 
-  async resetPassword(body: Record<string, string>) {
+  async resetPassword(body: Record<string, string>, subsystem = 'mad') {
+    if (!staffPermissions[subsystem]) throw invalidInput();
     if (
       !body.email ||
       body.email.length > 320 ||
@@ -383,8 +386,8 @@ export class StaffAuth {
       throw invalidInput('Enter your email, six-digit code and a new password of at least 12 characters.');
     const result = await this.transaction(async client => {
       const { rows } = await client.query<Account>(
-        "SELECT * FROM public.staff_users WHERE lower(email)=$1 AND (roles && ARRAY['MANAGER','ROOT']::text[]) AND is_active=true FOR UPDATE",
-        [body.email.trim().toLowerCase()]
+        'SELECT * FROM public.staff_users WHERE lower(email)=$1 AND (roles && $2::text[]) AND is_active=true FOR UPDATE',
+        [body.email.trim().toLowerCase(), ['ROOT', ...staffPermissions[subsystem]]]
       );
       const account = rows[0];
 

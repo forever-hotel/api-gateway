@@ -246,3 +246,41 @@ test('password change retains the effective subsystem role for multi-role accoun
   assert.equal(changed.role, 'WORKER');
   assert.deepEqual(changed.roles, ['RECEPTIONIST', 'WORKER']);
 });
+
+test('password recovery restricts both steps to the requesting subsystem roles', async t => {
+  for (const [system, expected] of [
+    ['mad', ['ROOT', 'MANAGER']],
+    ['fds', ['ROOT', 'RECEPTIONIST']],
+    ['wms', ['ROOT', 'WORKER']],
+    ['wkms', ['ROOT', 'WORKER']],
+    ['kms', ['ROOT', 'KITCHEN_STAFF', 'KITCHEN_MANAGER']]
+  ] as const) {
+    const auth = new StaffAuth({ ...config, emailEnabled: true });
+    t.after(() => auth.database.end());
+    const selected: unknown[][] = [];
+    const client = {
+      async query(sql: string, values?: unknown[]) {
+        if (sql.includes('FROM public.staff_users')) {
+          assert.ok(sql.includes('roles && $2::text[]'));
+          selected.push(values!);
+        }
+        return { rows: [], rowCount: 0 };
+      },
+      release() {}
+    };
+    t.mock.method(auth.database, 'connect', async () => client);
+    await auth.requestReset('person@example.invalid', system);
+    await assert.rejects(
+      auth.resetPassword(
+        { email: 'person@example.invalid', code: '123456', newPassword: 'new-private-password' },
+        system
+      )
+    );
+    assert.equal(selected.length, 2);
+    for (const values of selected) assert.deepEqual(values, ['person@example.invalid', expected]);
+    await assert.rejects(
+      auth.requestReset('person@example.invalid', 'unknown'),
+      error => (error as { status: number }).status === 400
+    );
+  }
+});
