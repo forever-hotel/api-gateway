@@ -86,7 +86,7 @@ test(
     const id = randomUUID(),
       password = 'system-private-password';
 
-    await database.query(`CREATE TABLE staff_users(worker_id uuid PRIMARY KEY,username text,email text,password_hash text,role text,is_active boolean,password_change_required boolean,session_version integer,failed_attempts integer,locked_until timestamptz,updated_at timestamptz);
+    await database.query(`CREATE TABLE staff_users(worker_id uuid PRIMARY KEY,username text,email text,password_hash text,role text,roles text[] DEFAULT ARRAY['MANAGER'],is_active boolean,password_change_required boolean,session_version integer,failed_attempts integer,locked_until timestamptz,updated_at timestamptz);
     CREATE TABLE mad_revoked_sessions(token_hash text PRIMARY KEY,expires_at timestamptz);`);
     await database.query(
       "INSERT INTO staff_users VALUES($1,'manager','manager@example.invalid',$2,'MANAGER',true,false,0,0,NULL,now())",
@@ -103,7 +103,7 @@ test(
       secret: 'system-test-secret-at-least-32-characters',
       issuer: 'system-test',
       emailEnabled: false,
-      sendgridKey: '',
+      brevoKey: '',
       sender: ''
     };
     const gateway = await buildApp(config, false);

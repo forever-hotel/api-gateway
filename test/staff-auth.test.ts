@@ -13,7 +13,7 @@ const config: StaffAuthConfig = {
   secret: 'gateway-test-secret-at-least-32-characters',
   issuer: 'gateway-test',
   emailEnabled: false,
-  sendgridKey: '',
+  brevoKey: '',
   sender: ''
 };
 const account = {
@@ -152,8 +152,8 @@ test('auth configuration validates database parts, TLS and email settings', () =
       ...base,
       DB_SSL: 'true',
       STAFF_EMAIL_ENABLED: 'true',
-      SENDGRID_API_KEY: 'test',
-      SENDGRID_FROM_EMAIL: 'sender@example.invalid'
+      BREVO_API_KEY: 'test',
+      STAFF_EMAIL_FROM: 'sender@example.invalid'
     })?.emailEnabled,
     true
   );
@@ -169,7 +169,7 @@ test('auth configuration validates database parts, TLS and email settings', () =
     { DATABASE_URL: 'https://db.invalid' },
     { JWT_ISSUER: '' },
     { STAFF_EMAIL_ENABLED: 'true' },
-    { STAFF_EMAIL_ENABLED: 'true', SENDGRID_API_KEY: 'test', SENDGRID_FROM_EMAIL: 'bad' }
+    { STAFF_EMAIL_ENABLED: 'true', BREVO_API_KEY: 'test', STAFF_EMAIL_FROM: 'bad' }
   ])
     assert.throws(() => staffAuthConfig({ ...base, ...invalid }));
 });
@@ -213,4 +213,36 @@ test('provider/storage failures are sanitized while auth failures retain their s
     error => (error as Error).message.indexOf('private') < 0
   );
   await assert.rejects(auth.session('invalid'));
+});
+
+test('multi-role sessions select subsystem permission and ROOT reaches every staff system', async t => {
+  const auth = new StaffAuth(config);
+  t.after(() => auth.database.end());
+  let row = { ...account, roles: ['MANAGER', 'WORKER'] };
+  t.mock.method(auth.database, 'query', async () => ({ rows: [row] }));
+  assert.equal((await auth.session(token(), 'wkms', false)).role, 'WORKER');
+  await assert.rejects(auth.session(token(), 'fds', false));
+  row = { ...account, roles: ['ROOT'] };
+  for (const system of ['mad', 'fds', 'wms', 'wkms', 'kms', 'hw', 'foss'])
+    assert.equal((await auth.session(token('ROOT'), system, false)).role, 'ROOT');
+});
+
+test('only verified sessions receive independent request budgets', async t => {
+  const auth = new StaffAuth(config);
+  t.after(() => auth.database.end());
+  assert.equal(auth.rateIdentity('forged'), undefined);
+  const first = auth.rateIdentity(token());
+  const second = auth.rateIdentity(token());
+  assert.ok(first && second);
+  assert.notEqual(first, second);
+});
+
+test('password change retains the effective subsystem role for multi-role accounts', async t => {
+  const auth = new StaffAuth(config);
+  t.after(() => auth.database.end());
+  const row = { ...account, role: 'RECEPTIONIST', roles: ['RECEPTIONIST', 'WORKER'], session_version: 1 };
+  const client = { query: async () => ({ rows: [row] }) } as unknown as Parameters<StaffAuth['replacePassword']>[0];
+  const changed = await auth.replacePassword(client, row, 'changed-private-password', 'wkms');
+  assert.equal(changed.role, 'WORKER');
+  assert.deepEqual(changed.roles, ['RECEPTIONIST', 'WORKER']);
 });

@@ -1,7 +1,7 @@
-import { compare } from 'bcryptjs';
-import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
+import { compare, hash } from 'bcryptjs';
+import { scrypt, timingSafeEqual } from 'node:crypto';
 
-// OWASP scrypt profile: N=2^15, r=8, p=3 (32 MiB).
+// Legacy scrypt verification profile: N=2^15, r=8, p=3 (32 MiB).
 const options = { N: 32768, r: 8, p: 3, maxmem: 64 * 1024 * 1024 };
 
 function derive(password: string, salt: string): Promise<Buffer> {
@@ -11,18 +11,16 @@ function derive(password: string, salt: string): Promise<Buffer> {
 }
 
 export function validPassword(password: string) {
-  return password.length >= 12 && password.length <= 1024 && /\S/.test(password);
+  return password.length >= 12 && Buffer.byteLength(password, 'utf8') <= 72 && /\S/.test(password);
 }
 
 export async function hashPassword(password: string): Promise<string> {
-  const salt = randomBytes(16).toString('hex');
-  const key = await derive(password, salt);
-
-  return ['scrypt', '32768', '8', '3', salt, key.toString('hex')].join('$');
+  return hash(password, 12);
 }
 
 export async function verifyPassword(password: string, encoded?: string) {
-  if (encoded && /^\$2[aby]\$12\$[./A-Za-z0-9]{53}$/.test(encoded)) return compare(password, encoded);
+  if (encoded && /^\$2[aby]\$(?:1[2-6])\$[./A-Za-z0-9]{53}$/.test(encoded))
+    return Buffer.byteLength(password, 'utf8') <= 72 && compare(password, encoded);
   const parts = encoded?.split('$') ?? [];
   const valid =
     parts.length === 6 &&

@@ -74,6 +74,8 @@ async function configureTransport(app: FastifyInstance, config: Config) {
     exposedHeaders: ['X-Request-Id', 'Retry-After'],
     maxAge: 600
   });
+
+  let staffAuth: ReturnType<typeof registerStaffAuth> | undefined;
   const loginPath = (request: { method: string; url: string }) => {
     const path = request.url.split('?')[0].replace(/\/+$/, '').toLowerCase();
 
@@ -90,7 +92,9 @@ async function configureTransport(app: FastifyInstance, config: Config) {
     keyGenerator: request => {
       const path = loginPath(request);
 
-      return path ? request.ip + ':login:' + path : request.ip + ':general';
+      const token = request.headers.authorization?.replace(/^Bearer /, '') ?? '';
+      const identity = staffAuth?.rateIdentity(token);
+      return path ? request.ip + ':login:' + path : identity ? 'session:' + identity : request.ip + ':general';
     },
     timeWindow: config.windowMs,
     skipOnError: false,
@@ -122,7 +126,8 @@ async function configureTransport(app: FastifyInstance, config: Config) {
   // Preserve exact bytes for downstream signature/body validation; bounded by Fastify.
   app.removeAllContentTypeParsers();
   app.addContentTypeParser('*', { parseAs: 'buffer' }, (_request, body, done) => done(null, body));
-  const staffAuth = config.staffAuth ? registerStaffAuth(app, config.staffAuth) : undefined;
+
+  staffAuth = config.staffAuth ? registerStaffAuth(app, config.staffAuth) : undefined;
 
   app.get('/health/live', async () => ({
     status: 'ok',
@@ -130,7 +135,7 @@ async function configureTransport(app: FastifyInstance, config: Config) {
   }));
   app.get('/health/ready', async () => {
     if (staffAuth) {
-      await staffAuth.safely(() => staffAuth.database.query('SELECT worker_id FROM public.staff_users LIMIT 0'));
+      await staffAuth.safely(() => staffAuth.database.query('SELECT worker_id,roles FROM public.staff_users LIMIT 0'));
       if (staffAuth.config.emailEnabled)
         await staffAuth.safely(() =>
           staffAuth.database.query(
@@ -192,6 +197,7 @@ async function configureTransport(app: FastifyInstance, config: Config) {
       if (
         staffAuth &&
         Object.hasOwn(staffPermissions, subsystem) &&
+        !['hw', 'foss'].includes(subsystem) &&
         !['/health/live', '/health/ready'].includes(healthPath)
       ) {
         await staffAuth.safely(() => staffAuth.session(bearer(request), subsystem, false));
