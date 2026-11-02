@@ -4,6 +4,7 @@ import { createHash, createHmac, randomInt, randomUUID, timingSafeEqual } from '
 import type { StaffAuthConfig } from './staff-auth-config.ts';
 import { GatewayError, unavailable } from './errors.ts';
 import { hashPassword, validPassword, verifyPassword } from './password.ts';
+import { passwordResetEmail } from './password-reset-email.ts';
 
 export const staffPermissions: Record<string, readonly string[]> = {
   mad: ['MANAGER'],
@@ -351,8 +352,7 @@ export class StaffAuth {
           body: JSON.stringify({
             to: [{ email: delivery.email }],
             sender: { email: this.config.sender },
-            subject: 'Forever Hotel password reset',
-            textContent: `Your password reset code is ${code}. It expires in 10 minutes. If you did not request this, ignore this email. Never share this code.`
+            ...passwordResetEmail(code)
           })
         });
 
