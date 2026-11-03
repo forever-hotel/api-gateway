@@ -114,6 +114,15 @@ async function configureTransport(app: FastifyInstance, config: Config) {
       candidate => pathname === candidate.prefix || pathname.startsWith(candidate.prefix + '/')
     );
 
+    if (/\/auth\/(login|logout|change-password|request-password-reset|reset-password)/.test(pathname)) {
+      app.log.info({
+        event: 'staff_security_request',
+        requestId: request.id,
+        method: request.method,
+        status: reply.statusCode,
+        outcome: reply.statusCode < 400 ? 'accepted' : 'rejected'
+      });
+    }
     app.log.info({
       event: 'request_complete',
       requestId: request.id,
@@ -135,7 +144,14 @@ async function configureTransport(app: FastifyInstance, config: Config) {
   }));
   app.get('/health/ready', async () => {
     if (staffAuth) {
-      await staffAuth.safely(() => staffAuth.database.query('SELECT worker_id,roles FROM public.staff_users LIMIT 0'));
+      await staffAuth.safely(() =>
+        staffAuth.database.query(
+          'SELECT worker_id,roles,role,email,username,password_hash,is_active,password_change_required,session_version,failed_attempts,locked_until FROM public.staff_users LIMIT 0'
+        )
+      );
+      await staffAuth.safely(() =>
+        staffAuth.database.query('SELECT token_hash,expires_at FROM public.mad_revoked_sessions LIMIT 0')
+      );
       if (staffAuth.config.emailEnabled)
         await staffAuth.safely(() =>
           staffAuth.database.query(
@@ -143,6 +159,10 @@ async function configureTransport(app: FastifyInstance, config: Config) {
           )
         );
     }
+    return { status: 'ok', service: 'forever-hotel-api-gateway' };
+  });
+  // Diagnostic aggregate only: an optional subsystem outage must not remove the ingress.
+  app.get('/health/upstreams', async () => {
     const upstreams = [...new Set(config.routes.map(route => route.upstream))];
     const checks = await Promise.all(
       upstreams.map(async upstream => {

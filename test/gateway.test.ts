@@ -504,12 +504,13 @@ test('CORS restricts origins and permits approved authorization preflight', asyn
   assert.equal(response.headers['access-control-allow-origin'], 'http://localhost:3000');
   assert.equal(calls.length, 0);
 });
-test('health depends on enabled services without a central session lookup', async t => {
+test('optional upstream failures do not remove the gateway from readiness', async t => {
   const { app, outage } = await fixture(t);
 
   assert.equal((await app.inject({ url: '/health/ready' })).statusCode, 200);
   outage();
-  assert.equal((await app.inject({ url: '/health/ready' })).statusCode, 503);
+  assert.equal((await app.inject({ url: '/health/ready' })).statusCode, 200);
+  assert.equal((await app.inject({ url: '/health/upstreams' })).statusCode, 503);
   assert.equal((await app.inject({ url: '/health/live' })).statusCode, 200);
 });
 test('configuration needs no JWT settings and rejects obsolete policy fields', () => {
