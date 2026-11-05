@@ -32,7 +32,6 @@ JWT secrets, SendGrid keys and local `.env` files out of Git.
 | `/kms/*`      | `/kms/*`      | 4500         | kms_session, kms_csrf   |
 | `/wkms/*`     | `/wkms/*`     | 4600         | wkms_session, wkms_csrf |
 
-
 | Endpoint                            | Body / behavior                                                                 |
 | ----------------------------------- | ------------------------------------------------------------------------------- |
 | `POST /auth/login`                  | `username`, `password`, optional `subsystem` (`mad`, `fds`, `kms`, `wkms`)      |
@@ -59,7 +58,6 @@ but cannot call business APIs. Owner services retain business authorization chec
 MAD's backend uses `AUTH_SERVICE_URL` to verify sessions on direct requests too.
 Guest route contracts, additional owner-role access and provider login wiring must be
 agreed with the respective teams before enabling their services.
-
 
 ## Manager recovery and email
 

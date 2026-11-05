@@ -10,55 +10,42 @@ import type { Config } from '../src/config.ts';
 import { requestPath } from '../src/http.ts';
 import { readFileSync } from 'node:fs';
 
-test('HW forwards PayHere form notifications byte-for-byte without guest authentication', async (t) => {
-  const shippedRoutes: unknown = JSON.parse(
-    readFileSync('config/routes.json', 'utf8'),
-  );
+test('HW forwards PayHere form notifications byte-for-byte without guest authentication', async t => {
+  const shippedRoutes: unknown = JSON.parse(readFileSync('config/routes.json', 'utf8'));
   const { app, calls } = await fixture(t, {}, shippedRoutes);
-  const payload =
-    'merchant_id=123456&order_id=fixture&payhere_amount=20000.00&status_code=2&md5sig=ABC%2B123';
+  const payload = 'merchant_id=123456&order_id=fixture&payhere_amount=20000.00&status_code=2&md5sig=ABC%2B123';
   const response = await app.inject({
     method: 'POST',
     url: '/hw/payments/payhere/notify',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    payload,
+    payload
   });
   assert.equal(response.statusCode, 200);
   assert.equal(calls.at(-1)?.path, '/payments/payhere/notify');
   assert.equal(calls.at(-1)?.body, payload);
-  assert.equal(
-    calls.at(-1)?.headers['content-type'],
-    'application/x-www-form-urlencoded',
-  );
+  assert.equal(calls.at(-1)?.headers['content-type'], 'application/x-www-form-urlencoded');
 });
-test('shipped HW routes preserve booking contract paths, identity, request keys and JSON bodies', async (t) => {
-  const shippedRoutes: unknown = JSON.parse(
-    readFileSync('config/routes.json', 'utf8'),
-  );
+test('shipped HW routes preserve booking contract paths, identity, request keys and JSON bodies', async t => {
+  const shippedRoutes: unknown = JSON.parse(readFileSync('config/routes.json', 'utf8'));
   const { app, calls } = await fixture(t, {}, shippedRoutes);
   const id = '11111111-1111-4111-8111-111111111111';
   for (const path of [
     '/room-types',
-    '/availability?roomTypeId=' +
-    id +
-    '&checkInDate=2099-12-10&checkOutDate=2099-12-12&numberOfGuests=2',
+    '/availability?roomTypeId=' + id + '&checkInDate=2099-12-10&checkOutDate=2099-12-12&numberOfGuests=2',
     '/promotions?limit=20',
     '/bookings?category=upcoming&page=1',
     `/bookings/${id}/management`,
-    `/payments/${id}`,
+    `/payments/${id}`
   ]) {
     const response = await app.inject({
       method: 'GET',
       url: '/hw' + path,
-      headers: { authorization: 'Bearer contract-fixture-token' },
+      headers: { authorization: 'Bearer contract-fixture-token' }
     });
     assert.equal(response.statusCode, 200);
     assert.equal(calls.at(-1)?.service, 'hw');
     assert.equal(calls.at(-1)?.path, path);
-    assert.equal(
-      calls.at(-1)?.headers.authorization,
-      'Bearer contract-fixture-token',
-    );
+    assert.equal(calls.at(-1)?.headers.authorization, 'Bearer contract-fixture-token');
   }
   for (const [path, body] of [
     [
@@ -67,11 +54,11 @@ test('shipped HW routes preserve booking contract paths, identity, request keys 
         roomTypeId: id,
         checkInDate: '2099-12-10',
         checkOutDate: '2099-12-12',
-        numberOfGuests: 2,
-      },
+        numberOfGuests: 2
+      }
     ],
     [`/bookings/${id}/changes`, { quoteToken: 'signed.fixture' }],
-    [`/bookings/${id}/cancellations`, { revision: 1 }],
+    [`/bookings/${id}/cancellations`, { revision: 1 }]
   ] as const) {
     const payload = JSON.stringify(body);
     const response = await app.inject({
@@ -80,28 +67,18 @@ test('shipped HW routes preserve booking contract paths, identity, request keys 
       headers: {
         authorization: 'Bearer contract-fixture-token',
         'idempotency-key': 'contract-stable-request',
-        'content-type': 'application/json',
+        'content-type': 'application/json'
       },
-      payload,
+      payload
     });
     assert.equal(response.statusCode, 200);
     assert.equal(calls.at(-1)?.path, path);
     assert.equal(calls.at(-1)?.body, payload);
-    assert.equal(
-      calls.at(-1)?.headers.authorization,
-      'Bearer contract-fixture-token',
-    );
-    assert.equal(
-      calls.at(-1)?.headers['idempotency-key'],
-      'contract-stable-request',
-    );
+    assert.equal(calls.at(-1)?.headers.authorization, 'Bearer contract-fixture-token');
+    assert.equal(calls.at(-1)?.headers['idempotency-key'], 'contract-stable-request');
   }
 });
-async function server(
-  t: TestContext,
-  handler: (req: IncomingMessage, res: ServerResponse) => void,
-) {
-
+async function server(t: TestContext, handler: (req: IncomingMessage, res: ServerResponse) => void) {
   const instance = createServer(handler);
 
   await new Promise<void>(resolve => instance.listen(0, '127.0.0.1', resolve));
@@ -349,10 +326,8 @@ test('FDS shipped routing removes prefix and preserves other subsystem routes', 
   assert.equal(calls.at(-1)?.path, '/auth/login');
 });
 
-test('HW shipped routes strip the prefix for rooms, contact and guest authentication', async (t) => {
-  const shippedRoutes: unknown = JSON.parse(
-    readFileSync('config/routes.json', 'utf8'),
-  );
+test('HW shipped routes strip the prefix for rooms, contact and guest authentication', async t => {
+  const shippedRoutes: unknown = JSON.parse(readFileSync('config/routes.json', 'utf8'));
   const { app, calls } = await fixture(t, {}, shippedRoutes);
   for (const [method, path] of [
     ['GET', '/room-types'],
@@ -360,30 +335,26 @@ test('HW shipped routes strip the prefix for rooms, contact and guest authentica
     ['POST', '/contact/enquiries'],
     ['POST', '/guests/register'],
     ['POST', '/guests/login'],
-    ['GET', '/guests/me'],
+    ['GET', '/guests/me']
   ] as const) {
     const response = await app.inject({
       method,
       url: '/hw' + path,
       headers: {
         authorization: 'Bearer opaque-test-token',
-        ...(method === 'POST' ? { 'content-type': 'application/json' } : {}),
+        ...(method === 'POST' ? { 'content-type': 'application/json' } : {})
       },
-      ...(method === 'POST' ? { payload: '{}' } : {}),
+      ...(method === 'POST' ? { payload: '{}' } : {})
     });
     assert.equal(response.statusCode, 200);
     assert.equal(calls.at(-1)?.service, 'hw');
     assert.equal(calls.at(-1)?.path, path);
-    assert.equal(
-      calls.at(-1)?.headers.authorization,
-      'Bearer opaque-test-token',
-    );
+    assert.equal(calls.at(-1)?.headers.authorization, 'Bearer opaque-test-token');
     if (method === 'POST') assert.equal(calls.at(-1)?.body, '{}');
   }
 });
 
-test('query and opaque authorization are forwarded without JWT or role validation', async (t) => {
-
+test('query and opaque authorization are forwarded without JWT or role validation', async t => {
   const { app, calls } = await fixture(t);
 
   for (const authorization of [undefined, 'Bearer malformed-token', 'Basic opaque-credentials']) {
@@ -439,31 +410,21 @@ test('unknown/disabled routes and ambiguous paths never reach an upstream', asyn
       status: number | undefined;
       body: string;
     }>((resolve, reject) => {
-      const incoming = httpRequest(
-        { hostname: '127.0.0.1', port: address.port, path, method: 'GET' },
-        (response) => {
-          let body = '';
-          response.setEncoding('utf8');
-          response.on('data', (chunk: string) => {
-            body += chunk;
-          });
-          response.on('error', reject);
-          response.on('end', () =>
-            resolve({ status: response.statusCode, body }),
-          );
-        },
-      );
+      const incoming = httpRequest({ hostname: '127.0.0.1', port: address.port, path, method: 'GET' }, response => {
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk: string) => {
+          body += chunk;
+        });
+        response.on('error', reject);
+        response.on('end', () => resolve({ status: response.statusCode, body }));
+      });
       incoming.on('error', reject);
-      incoming.setTimeout(5000, () =>
-        incoming.destroy(new Error('Raw-path test timed out')),
-      );
+      incoming.setTimeout(5000, () => incoming.destroy(new Error('Raw-path test timed out')));
       incoming.end();
     });
     assert.equal(response.status, 400, path);
-    assert.equal(
-      (JSON.parse(response.body) as { code: string }).code,
-      'VALIDATION_ERROR',
-    );
+    assert.equal((JSON.parse(response.body) as { code: string }).code, 'VALIDATION_ERROR');
   }
 
   assert.equal(calls.length, 0);
@@ -515,7 +476,7 @@ test('login path case and trailing slash cannot create separate quotas', async t
   assert.equal((await app.inject({ method: 'POST', url: '/mad/auth/LOGIN/' })).statusCode, 429);
 });
 for (const endpoint of ['forgot-password', 'reset-password']) {
-  test(`${endpoint} uses the stricter authentication rate limit`, async (t) => {
+  test(`${endpoint} uses the stricter authentication rate limit`, async t => {
     const { app } = await fixture(t, { loginMax: 1, rateMax: 100 });
     const url = `/hw/guests/${endpoint}`;
     assert.equal((await app.inject({ method: 'POST', url })).statusCode, 200);
@@ -525,7 +486,7 @@ for (const endpoint of ['forgot-password', 'reset-password']) {
   });
 }
 
-test('CORS restricts origins and permits approved authorization preflight', async (t) => {
+test('CORS restricts origins and permits approved authorization preflight', async t => {
   const { app, calls } = await fixture(t);
 
   assert.equal(
