@@ -4,7 +4,7 @@ export interface StaffAuthConfig {
   secret: string;
   issuer: string;
   emailEnabled: boolean;
-  sendgridKey: string;
+  brevoKey: string;
   sender: string;
 }
 
@@ -32,15 +32,15 @@ export function staffAuthConfig(env: NodeJS.ProcessEnv): StaffAuthConfig | undef
     throw new Error('Invalid STAFF_EMAIL_ENABLED');
   const emailEnabled = env.STAFF_EMAIL_ENABLED === 'true';
 
-  if (emailEnabled && (!env.SENDGRID_API_KEY || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(env.SENDGRID_FROM_EMAIL ?? '')))
-    throw new Error('Email requires SendGrid API key and verified sender');
+  if (emailEnabled && (!env.BREVO_API_KEY || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(env.STAFF_EMAIL_FROM ?? '')))
+    throw new Error('Email requires Brevo API key and verified sender');
   return {
     databaseUrl,
     ssl: env.DB_SSL === 'true',
     secret: env.JWT_SECRET,
     issuer: env.JWT_ISSUER,
     emailEnabled,
-    sendgridKey: env.SENDGRID_API_KEY ?? '',
-    sender: env.SENDGRID_FROM_EMAIL ?? ''
+    brevoKey: env.BREVO_API_KEY ?? '',
+    sender: env.STAFF_EMAIL_FROM ?? ''
   };
 }

@@ -4,20 +4,35 @@ import { createHash, createHmac, randomInt, randomUUID, timingSafeEqual } from '
 import type { StaffAuthConfig } from './staff-auth-config.ts';
 import { GatewayError, unavailable } from './errors.ts';
 import { hashPassword, validPassword, verifyPassword } from './password.ts';
+import { passwordResetEmail } from './password-reset-email.ts';
 
 export const staffPermissions: Record<string, readonly string[]> = {
   mad: ['MANAGER'],
+  hw: [],
+  foss: [],
   fds: ['RECEPTIONIST'],
   kms: ['KITCHEN_STAFF', 'KITCHEN_MANAGER'],
-  wkms: ['WORKER']
+  wkms: ['WORKER'],
+  wms: ['WORKER']
 };
-const roles = new Set(Object.values(staffPermissions).flat());
+const roles = new Set(['ROOT', ...Object.values(staffPermissions).flat()]);
+export function accountRoles(account: { role: string; roles?: string[] }): string[] {
+  const assigned = account.roles ?? [account.role];
+  if (!assigned.length || new Set(assigned).size !== assigned.length || assigned.some(role => !roles.has(role)))
+    throw invalidCredentials();
+  return assigned;
+}
+function systemRole(assigned: string[], subsystem?: string) {
+  if (assigned.includes('ROOT')) return 'ROOT';
+  return subsystem ? assigned.find(role => staffPermissions[subsystem]?.includes(role)) : assigned[0];
+}
 interface Account {
   worker_id: string;
   username: string;
   email: string;
   password_hash: string;
   role: string;
+  roles?: string[];
   is_active: boolean;
   password_change_required: boolean;
   session_version: number;
@@ -27,6 +42,7 @@ interface Account {
 interface Claims {
   sub: string;
   role: string;
+  roles?: string[];
   ver: number;
   exp: number;
   iat: number;
@@ -36,6 +52,7 @@ export interface StaffSession {
   sub: string;
   username: string;
   role: string;
+  roles?: string[];
   expiresAt: number;
   passwordChangeRequired: boolean;
 }
@@ -133,20 +150,34 @@ export class StaffAuth {
   }
 
   private describe(account: Account, claims: Claims): StaffSession {
-    if (!account.is_active || account.role !== claims.role || account.session_version !== claims.ver)
+    const assigned = accountRoles(account);
+    if (
+      !account.is_active ||
+      (assigned.includes('ROOT') ? 'ROOT' : account.role) !== claims.role ||
+      account.session_version !== claims.ver ||
+      (claims.roles !== undefined && JSON.stringify(claims.roles) !== JSON.stringify(assigned))
+    )
       throw invalidCredentials();
     return {
       sub: account.worker_id,
       username: account.username,
-      role: account.role,
+      role: assigned.includes('ROOT') ? 'ROOT' : account.role,
+      roles: assigned,
       expiresAt: claims.exp,
       passwordChangeRequired: account.password_change_required
     };
   }
 
-  private issue(account: Account) {
+  private issue(account: Account, subsystem?: string) {
     const accessToken = this.jwt.sign(
-      { sub: account.worker_id, role: account.role, ver: account.session_version, jti: randomUUID() },
+      {
+        sub: account.worker_id,
+        username: account.username,
+        role: accountRoles(account).includes('ROOT') ? 'ROOT' : account.role,
+        roles: accountRoles(account),
+        ver: account.session_version,
+        jti: randomUUID()
+      },
       {
         secret: this.config.secret,
         issuer: this.config.issuer,
@@ -156,7 +187,8 @@ export class StaffAuth {
       }
     );
 
-    return { accessToken, ...this.describe(account, this.claims(accessToken)) };
+    const session = this.describe(account, this.claims(accessToken));
+    return { accessToken, ...session, role: systemRole(session.roles!, subsystem) ?? session.role };
   }
 
   private locked(account: Account) {
@@ -182,21 +214,31 @@ export class StaffAuth {
     if (!rows[0]) throw invalidCredentials();
     const session = this.describe(rows[0], claims);
 
-    if (subsystem && !staffPermissions[subsystem]?.includes(session.role))
-      throw new GatewayError(403, 'FORBIDDEN', 'You do not have access to this subsystem.');
+    const effective = systemRole(session.roles!, subsystem);
+    if (subsystem && !effective) throw new GatewayError(403, 'FORBIDDEN', 'You do not have access to this subsystem.');
     if (!allowPasswordChange && session.passwordChangeRequired)
       throw new GatewayError(403, 'PASSWORD_CHANGE_REQUIRED', 'Change your password before opening the dashboard.');
-    return session;
+    return { ...session, role: effective ?? session.role };
+  }
+
+  // Only a locally verified signed JWT earns a per-session budget. Invalid tokens stay IP limited.
+  rateIdentity(token: string): string | undefined {
+    try {
+      return this.claims(token).jti;
+    } catch {
+      return undefined;
+    }
   }
 
   async login(body: Record<string, string>, subsystem?: string) {
-    if (!body.username?.trim() || body.username.length > 100 || !body.password) throw invalidInput();
+    if (!body.username?.trim() || body.username.length > 320 || !body.password) throw invalidInput();
     if (subsystem && !staffPermissions[subsystem]) throw invalidInput();
     const result = await this.transaction(async client => {
-      const { rows } = await client.query<Account>('SELECT * FROM public.staff_users WHERE username=$1 FOR UPDATE', [
-        body.username.trim().toLowerCase()
-      ]);
-      const account = rows[0];
+      const { rows } = await client.query<Account>(
+        'SELECT * FROM public.staff_users WHERE lower(username)=$1 OR lower(email)=$1 FOR UPDATE',
+        [body.username.trim().toLowerCase()]
+      );
+      const account = rows.length === 1 ? rows[0] : undefined;
       const valid = await verifyPassword(body.password, account?.password_hash);
 
       if (!account || !account.is_active || !roles.has(account.role) || this.locked(account)) return null;
@@ -204,23 +246,24 @@ export class StaffAuth {
         await this.failure(client, account);
         return null;
       }
-      if (subsystem && !staffPermissions[subsystem].includes(account.role))
+      if (subsystem && !systemRole(accountRoles(account), subsystem))
         throw new GatewayError(403, 'FORBIDDEN', 'You do not have access to this subsystem.');
       await client.query(
         'UPDATE public.staff_users SET failed_attempts=0,locked_until=NULL,updated_at=now() WHERE worker_id=$1',
         [account.worker_id]
       );
-      return this.issue(account);
+      const issued = this.issue(account, subsystem);
+      return { ...issued, role: systemRole(accountRoles(account), subsystem) ?? issued.role };
     });
 
     if (!result) throw invalidCredentials();
     return result;
   }
 
-  async changePassword(token: string, body: Record<string, string>) {
+  async changePassword(token: string, body: Record<string, string>, subsystem?: string) {
     if (!body.currentPassword || !validPassword(body.newPassword ?? ''))
-      throw invalidInput('Use a password with 12 to 1024 characters.');
-    const session = await this.session(token);
+      throw invalidInput('Use at least 12 characters and at most 72 UTF-8 bytes.');
+    const session = await this.session(token, subsystem);
     const result = await this.transaction(async client => {
       const { rows } = await client.query<Account>('SELECT * FROM public.staff_users WHERE worker_id=$1 FOR UPDATE', [
         session.sub
@@ -241,20 +284,20 @@ export class StaffAuth {
       }
       if (await verifyPassword(body.newPassword, account.password_hash))
         throw invalidInput('Choose a different password from your current password.');
-      return this.replacePassword(client, account, body.newPassword);
+      return this.replacePassword(client, account, body.newPassword, subsystem);
     });
 
     if (!result) throw invalidCredentials();
     return result;
   }
 
-  async replacePassword(client: PoolClient, account: Account, password: string) {
+  async replacePassword(client: PoolClient, account: Account, password: string, subsystem?: string) {
     const { rows } = await client.query<Account>(
       'UPDATE public.staff_users SET password_hash=$2,password_change_required=false,session_version=session_version+1,failed_attempts=0,locked_until=NULL,updated_at=now() WHERE worker_id=$1 RETURNING *',
       [account.worker_id, await hashPassword(password)]
     );
 
-    return this.issue(rows[0]);
+    return this.issue(rows[0], subsystem);
   }
 
   async logout(token: string) {
@@ -273,7 +316,8 @@ export class StaffAuth {
       .digest('hex');
   }
 
-  async requestReset(email: string) {
+  async requestReset(email: string, subsystem = 'mad') {
+    if (!staffPermissions[subsystem]) throw invalidInput();
     if (!email || email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
       throw invalidInput('Enter a valid email address.');
     if (!this.config.emailEnabled) throw unavailable();
@@ -281,8 +325,8 @@ export class StaffAuth {
     const challenge = randomUUID();
     const delivery = await this.transaction(async client => {
       const { rows } = await client.query<Account>(
-        "SELECT * FROM public.staff_users WHERE lower(email)=$1 AND role='MANAGER' AND is_active=true FOR UPDATE",
-        [email.trim().toLowerCase()]
+        'SELECT * FROM public.staff_users WHERE lower(email)=$1 AND (roles && $2::text[]) AND is_active=true FOR UPDATE',
+        [email.trim().toLowerCase(), ['ROOT', ...staffPermissions[subsystem]]]
       );
 
       if (!rows[0]) return null;
@@ -300,47 +344,39 @@ export class StaffAuth {
 
     if (delivery) {
       try {
-        const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
+        const response = await fetch('https://api.brevo.com/v3/smtp/email', {
           method: 'POST',
           redirect: 'error',
           signal: AbortSignal.timeout(8000),
-          headers: { Authorization: 'Bearer ' + this.config.sendgridKey, 'Content-Type': 'application/json' },
+          headers: { 'api-key': this.config.brevoKey, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            personalizations: [{ to: [{ email: delivery.email }] }],
-            from: { email: this.config.sender },
-            subject: 'Forever Hotel manager password reset',
-            content: [
-              {
-                type: 'text/plain',
-                value: `Your password reset code is ${code}. It expires in 10 minutes. If you did not request this, ignore this email. Never share this code.`
-              }
-            ],
-            tracking_settings: {
-              click_tracking: { enable: false, enable_text: false },
-              open_tracking: { enable: false }
-            }
+            to: [{ email: delivery.email }],
+            sender: { email: this.config.sender },
+            ...passwordResetEmail(code)
           })
         });
 
         await response.body?.cancel();
-        if (response.status !== 202) throw new Error();
+        if (response.status !== 201) throw new Error();
       } catch {
         await this.database.query('DELETE FROM public.gateway_password_resets WHERE worker_id=$1 AND challenge_id=$2', [
           delivery.worker_id,
           challenge
         ]);
-        this.report('manager_reset_email_not_accepted');
+        this.report('staff_reset_email_not_accepted');
         // Return the same public response for unknown accounts and provider failures.
-        // Provider delivery/activity is checked in SendGrid, without exposing account existence.
+        // Provider delivery/activity is checked in Brevo, without exposing account existence.
       }
     }
     return {
       status: 'code_requested',
-      message: 'If an active manager account matches, a code will be emailed. Check your inbox and spam folder.'
+      message:
+        'If an active account with access to this system matches, a code will be emailed. Check your inbox and spam folder.'
     };
   }
 
-  async resetPassword(body: Record<string, string>) {
+  async resetPassword(body: Record<string, string>, subsystem = 'mad') {
+    if (!staffPermissions[subsystem]) throw invalidInput();
     if (
       !body.email ||
       body.email.length > 320 ||
@@ -350,8 +386,8 @@ export class StaffAuth {
       throw invalidInput('Enter your email, six-digit code and a new password of at least 12 characters.');
     const result = await this.transaction(async client => {
       const { rows } = await client.query<Account>(
-        "SELECT * FROM public.staff_users WHERE lower(email)=$1 AND role='MANAGER' AND is_active=true FOR UPDATE",
-        [body.email.trim().toLowerCase()]
+        'SELECT * FROM public.staff_users WHERE lower(email)=$1 AND (roles && $2::text[]) AND is_active=true FOR UPDATE',
+        [body.email.trim().toLowerCase(), ['ROOT', ...staffPermissions[subsystem]]]
       );
       const account = rows[0];
 
