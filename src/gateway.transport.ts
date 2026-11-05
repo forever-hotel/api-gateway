@@ -74,6 +74,8 @@ async function configureTransport(app: FastifyInstance, config: Config) {
     exposedHeaders: ['X-Request-Id', 'Retry-After'],
     maxAge: 600
   });
+
+  let staffAuth: ReturnType<typeof registerStaffAuth> | undefined;
   const loginPath = (request: { method: string; url: string }) => {
     const path = request.url.split('?')[0].replace(/\/+$/, '').toLowerCase();
 
@@ -90,7 +92,9 @@ async function configureTransport(app: FastifyInstance, config: Config) {
     keyGenerator: request => {
       const path = loginPath(request);
 
-      return path ? request.ip + ':login:' + path : request.ip + ':general';
+      const token = request.headers.authorization?.replace(/^Bearer /, '') ?? '';
+      const identity = staffAuth?.rateIdentity(token);
+      return path ? request.ip + ':login:' + path : identity ? 'session:' + identity : request.ip + ':general';
     },
     timeWindow: config.windowMs,
     skipOnError: false,
@@ -110,6 +114,15 @@ async function configureTransport(app: FastifyInstance, config: Config) {
       candidate => pathname === candidate.prefix || pathname.startsWith(candidate.prefix + '/')
     );
 
+    if (/\/auth\/(login|logout|change-password|request-password-reset|reset-password)/.test(pathname)) {
+      app.log.info({
+        event: 'staff_security_request',
+        requestId: request.id,
+        method: request.method,
+        status: reply.statusCode,
+        outcome: reply.statusCode < 400 ? 'accepted' : 'rejected'
+      });
+    }
     app.log.info({
       event: 'request_complete',
       requestId: request.id,
@@ -122,7 +135,8 @@ async function configureTransport(app: FastifyInstance, config: Config) {
   // Preserve exact bytes for downstream signature/body validation; bounded by Fastify.
   app.removeAllContentTypeParsers();
   app.addContentTypeParser('*', { parseAs: 'buffer' }, (_request, body, done) => done(null, body));
-  const staffAuth = config.staffAuth ? registerStaffAuth(app, config.staffAuth) : undefined;
+
+  staffAuth = config.staffAuth ? registerStaffAuth(app, config.staffAuth) : undefined;
 
   app.get('/health/live', async () => ({
     status: 'ok',
@@ -130,7 +144,14 @@ async function configureTransport(app: FastifyInstance, config: Config) {
   }));
   app.get('/health/ready', async () => {
     if (staffAuth) {
-      await staffAuth.safely(() => staffAuth.database.query('SELECT worker_id FROM public.staff_users LIMIT 0'));
+      await staffAuth.safely(() =>
+        staffAuth.database.query(
+          'SELECT worker_id,roles,role,email,username,password_hash,is_active,password_change_required,session_version,failed_attempts,locked_until FROM public.staff_users LIMIT 0'
+        )
+      );
+      await staffAuth.safely(() =>
+        staffAuth.database.query('SELECT token_hash,expires_at FROM public.mad_revoked_sessions LIMIT 0')
+      );
       if (staffAuth.config.emailEnabled)
         await staffAuth.safely(() =>
           staffAuth.database.query(
@@ -138,6 +159,10 @@ async function configureTransport(app: FastifyInstance, config: Config) {
           )
         );
     }
+    return { status: 'ok', service: 'forever-hotel-api-gateway' };
+  });
+  // Diagnostic aggregate only: an optional subsystem outage must not remove the ingress.
+  app.get('/health/upstreams', async () => {
     const upstreams = [...new Set(config.routes.map(route => route.upstream))];
     const checks = await Promise.all(
       upstreams.map(async upstream => {
@@ -192,6 +217,7 @@ async function configureTransport(app: FastifyInstance, config: Config) {
       if (
         staffAuth &&
         Object.hasOwn(staffPermissions, subsystem) &&
+        !['hw', 'foss'].includes(subsystem) &&
         !['/health/live', '/health/ready'].includes(healthPath)
       ) {
         await staffAuth.safely(() => staffAuth.session(bearer(request), subsystem, false));

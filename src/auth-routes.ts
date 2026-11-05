@@ -15,8 +15,17 @@ export function registerStaffAuth(app: FastifyInstance, config: StaffAuthConfig)
   app.addHook('onClose', async () => {
     await auth.database.end();
   });
-  for (const prefix of ['/auth', '/mad/auth']) {
-    const system = prefix === '/mad/auth' ? 'mad' : undefined;
+  for (const prefix of [
+    '/auth',
+    '/mad/auth',
+    '/fds/auth',
+    '/wms/auth',
+    '/wkms/auth',
+    '/kms/auth',
+    '/hw/staff-auth',
+    '/foss/staff-auth'
+  ]) {
+    const system = prefix === '/auth' ? undefined : prefix.split('/')[1];
 
     app.post(prefix + '/login', request =>
       auth.safely(() => {
@@ -39,14 +48,14 @@ export function registerStaffAuth(app: FastifyInstance, config: StaffAuthConfig)
         const token = bearer(request);
 
         await auth.session(token, system);
-        return auth.changePassword(token, authBody(request.body, ['currentPassword', 'newPassword']));
+        return auth.changePassword(token, authBody(request.body, ['currentPassword', 'newPassword']), system);
       })
     );
     app.post(prefix + '/request-password-reset', request =>
-      auth.safely(() => auth.requestReset(authBody(request.body, ['email']).email))
+      auth.safely(() => auth.requestReset(authBody(request.body, ['email']).email, system))
     );
     app.post(prefix + '/reset-password', request =>
-      auth.safely(() => auth.resetPassword(authBody(request.body, ['email', 'code', 'newPassword'])))
+      auth.safely(() => auth.resetPassword(authBody(request.body, ['email', 'code', 'newPassword']), system))
     );
   }
   return auth;
