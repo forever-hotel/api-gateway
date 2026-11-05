@@ -198,12 +198,3 @@ The parent repository currently ignores api-gateway.
 Hotel website integration: /hw/room-types, /hw/contact/enquiries, and
 /hw/guests/{register,login,me} forward to the same paths without /hw.
 Guest authentication uses the backend Authorization bearer token contract.
-
-### Standalone shared service checkout
-
-The system/performance tests now load `websocket-service` from a separate checkout,
-not MAD's dist/shared-websocket output. Build both the sibling `websocket/` service
-and `mad/backend/` first. Defaults from this repository are `../websocket` and
-`../mad/backend`; override SHARED_WEBSOCKET_PATH and MAD_BACKEND_PATH for CI or another
-layout. Root Compose already enables /realtime and builds the standalone image.
-The generic shipped route remains opt-in for installations without this service.
