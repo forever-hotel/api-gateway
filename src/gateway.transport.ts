@@ -78,7 +78,7 @@ async function configureTransport(app: FastifyInstance, config: Config) {
     const path = request.url.split('?')[0].replace(/\/+$/, '').toLowerCase();
 
     return request.method === 'POST' &&
-      ['/login', '/request-password-reset', '/reset-password'].some(suffix => path.endsWith(suffix))
+      ['/login', '/forgot-password', '/request-password-reset', '/reset-password'].some(suffix => path.endsWith(suffix))
       ? path
       : undefined;
   };

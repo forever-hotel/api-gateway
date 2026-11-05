@@ -432,7 +432,7 @@ test('unknown/disabled routes and ambiguous paths never reach an upstream', asyn
   // inject() uses WHATWG URL parsing, which normalizes encoded dot segments
   // before the gateway sees them. Send the original HTTP request target instead.
   await app.listen({ port: 0, host: '127.0.0.1' });
-  const address = app.server.address();
+  const address = app.getHttpServer().address();
   assert.ok(address && typeof address === 'object');
   for (const path of ['/mad/%2e%2e/auth', '/mad//rooms']) {
     const response = await new Promise<{
@@ -514,8 +514,18 @@ test('login path case and trailing slash cannot create separate quotas', async t
   assert.equal((await app.inject({ method: 'POST', url: '/mad/auth/login' })).statusCode, 200);
   assert.equal((await app.inject({ method: 'POST', url: '/mad/auth/LOGIN/' })).statusCode, 429);
 });
+for (const endpoint of ['forgot-password', 'reset-password']) {
+  test(`${endpoint} uses the stricter authentication rate limit`, async (t) => {
+    const { app } = await fixture(t, { loginMax: 1, rateMax: 100 });
+    const url = `/hw/guests/${endpoint}`;
+    assert.equal((await app.inject({ method: 'POST', url })).statusCode, 200);
+    const response = await app.inject({ method: 'POST', url });
+    assert.equal(response.statusCode, 429);
+    assert.ok(response.headers['retry-after']);
+  });
+}
 
-test('CORS restricts origins and permits approved authorization preflight', async t => {
+test('CORS restricts origins and permits approved authorization preflight', async (t) => {
   const { app, calls } = await fixture(t);
 
   assert.equal(
