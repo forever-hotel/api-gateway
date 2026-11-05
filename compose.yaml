@@ -7,11 +7,12 @@ services:
       HOST: 0.0.0.0
       PORT: 8080
       MAD_SERVICE_URL: http://host.docker.internal:4000
-      HW_SERVICE_URL: http://host.docker.internal:4100
-      FDS_SERVICE_URL: http://host.docker.internal:4200
-      FOSS_SERVICE_URL: http://host.docker.internal:4300
-      KMS_SERVICE_URL: http://host.docker.internal:4500
-      WKMS_SERVICE_URL: http://host.docker.internal:4600
+      HW_SERVICE_URL: http://host.docker.internal:4003
+      FDS_SERVICE_URL: http://host.docker.internal:4001
+      FOSS_SERVICE_URL: http://host.docker.internal:4004
+      KMS_SERVICE_URL: http://host.docker.internal:4005
+      WKMS_SERVICE_URL: http://host.docker.internal:4002
+      WEBSOCKET_SERVICE_URL: http://host.docker.internal:8081
     ports: ['127.0.0.1:8080:8080']
     extra_hosts: ['host.docker.internal:host-gateway']
     read_only: true

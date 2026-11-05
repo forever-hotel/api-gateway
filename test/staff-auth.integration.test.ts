@@ -29,7 +29,7 @@ test(
       secret: 'integration-secret-with-at-least-32-characters',
       issuer: 'gateway-test',
       emailEnabled: true,
-      sendgridKey: 'test-only',
+      brevoKey: 'test-only',
       sender: 'sender@example.invalid'
     };
     const auth = new StaffAuth(config);
@@ -40,7 +40,7 @@ test(
       await admin.end();
     });
     await auth.database
-      .query(`CREATE TABLE public.staff_users(worker_id uuid PRIMARY KEY,username text UNIQUE,email text UNIQUE,password_hash text,role text,is_active boolean DEFAULT true,password_change_required boolean DEFAULT false,session_version integer DEFAULT 0,failed_attempts integer DEFAULT 0,locked_until timestamptz,updated_at timestamptz DEFAULT now());
+      .query(`CREATE TABLE public.staff_users(worker_id uuid PRIMARY KEY,username text UNIQUE,email text UNIQUE,password_hash text,role text,roles text[],is_active boolean DEFAULT true,password_change_required boolean DEFAULT false,session_version integer DEFAULT 0,failed_attempts integer DEFAULT 0,locked_until timestamptz,updated_at timestamptz DEFAULT now());
     CREATE TABLE public.mad_revoked_sessions(token_hash text PRIMARY KEY,expires_at timestamptz NOT NULL);`);
     await auth.database.query(readFileSync('sql/manager-password-reset.sql', 'utf8'));
     const password = 'initial-private-password';
@@ -57,7 +57,7 @@ test(
 
       ids.set(role, id);
       await auth.database.query(
-        'INSERT INTO public.staff_users(worker_id,username,email,password_hash,role,password_change_required) VALUES($1,$2,$3,$4,$5,true)',
+        'INSERT INTO public.staff_users(worker_id,username,email,password_hash,role,roles,password_change_required) VALUES($1,$2,$3,$4,$5,ARRAY[$5]::text[],true)',
         [
           id,
           role.toLowerCase(),
@@ -91,10 +91,10 @@ test(
     let code = '';
 
     t.mock.method(globalThis, 'fetch', async (_input: string | URL | Request, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as { content: { value: string }[] };
+      const body = JSON.parse(String(init?.body)) as { textContent: string };
 
-      code = body.content[0].value.match(/code is ([0-9]{6})/)![1];
-      return new Response(null, { status: 202 });
+      code = body.textContent.match(/code is ([0-9]{6})/)![1];
+      return new Response(null, { status: 201 });
     });
     await auth.requestReset('manager@example.invalid');
     assert.match(code, /^[0-9]{6}$/);

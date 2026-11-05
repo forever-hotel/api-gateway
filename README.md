@@ -32,7 +32,6 @@ JWT secrets, SendGrid keys and local `.env` files out of Git.
 | `/kms/*`      | `/kms/*`      | 4500         | kms_session, kms_csrf   |
 | `/wkms/*`     | `/wkms/*`     | 4600         | wkms_session, wkms_csrf |
 
-
 | Endpoint                            | Body / behavior                                                                 |
 | ----------------------------------- | ------------------------------------------------------------------------------- |
 | `POST /auth/login`                  | `username`, `password`, optional `subsystem` (`mad`, `fds`, `kms`, `wkms`)      |
@@ -59,7 +58,6 @@ but cannot call business APIs. Owner services retain business authorization chec
 MAD's backend uses `AUTH_SERVICE_URL` to verify sessions on direct requests too.
 Guest route contracts, additional owner-role access and provider login wiring must be
 agreed with the respective teams before enabling their services.
-
 
 ## Manager recovery and email
 
@@ -200,3 +198,12 @@ The parent repository currently ignores api-gateway.
 Hotel website integration: /hw/room-types, /hw/contact/enquiries, and
 /hw/guests/{register,login,me} forward to the same paths without /hw.
 Guest authentication uses the backend Authorization bearer token contract.
+
+### Standalone shared service checkout
+
+The system/performance tests now load `websocket-service` from a separate checkout,
+not MAD's dist/shared-websocket output. Build both the sibling `websocket/` service
+and `mad/backend/` first. Defaults from this repository are `../websocket` and
+`../mad/backend`; override SHARED_WEBSOCKET_PATH and MAD_BACKEND_PATH for CI or another
+layout. Root Compose already enables /realtime and builds the standalone image.
+The generic shipped route remains opt-in for installations without this service.
