@@ -41,3 +41,78 @@ jobs:
           name: gateway-coverage
           path: coverage/
           if-no-files-found: warn
+
+  publish-image:
+    name: Publish reviewed API Gateway image
+    needs: [gateway]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      packages: write
+    concurrency:
+      group: gateway-image-publication
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require peer approval on the merged PR's final code
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const prs = await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, {
+              owner, repo, commit_sha: context.sha, per_page: 100
+            });
+            for (const pr of prs.filter(pr => pr.merged_at && pr.base.ref === 'develop' && pr.merge_commit_sha === context.sha)) {
+              const reviews = await github.paginate(github.rest.pulls.listReviews, { owner, repo, pull_number: pr.number, per_page: 100 });
+              const latest = new Map();
+              for (const review of reviews) {
+                if (review.user && ['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(review.state)) latest.set(review.user.login, review);
+              }
+              const decisions = [...latest.values()];
+              const approved = decisions.some(r => r.state === 'APPROVED' && r.commit_id === pr.head.sha && r.user.login !== pr.user.login);
+              if (approved && !decisions.some(r => r.state === 'CHANGES_REQUESTED')) return;
+            }
+            throw new Error('Image publication requires a merged PR into develop with peer approval on its final head commit.');
+      - name: Prepare temporary registry login and builder
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          export DOCKER_CONFIG="$RUNNER_TEMP/gateway-registry"
+          install -d -m 700 "$DOCKER_CONFIG"
+          echo "DOCKER_CONFIG=$DOCKER_CONFIG" >> "$GITHUB_ENV"
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker buildx create --name gateway-release --driver docker-container --use
+          docker buildx inspect --bootstrap
+      - name: Build and publish commit-tagged image
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          docker buildx build --platform linux/amd64 --push \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "$image:$GITHUB_SHA" \
+            --metadata-file "$RUNNER_TEMP/gateway-image.json" .
+          digest=$(jq -er '."containerimage.digest"' "$RUNNER_TEMP/gateway-image.json")
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          jq -n --arg commit "$GITHUB_SHA" --arg image "$image@$digest" \
+            '{commit: $commit, image: $image}' > release-image.json
+          {
+            echo '### Published API Gateway image'
+            echo '```json'
+            cat release-image.json
+            echo '```'
+            echo 'Image published only. Azure deployment is a separate step.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gateway-release-image
+          path: release-image.json
+          if-no-files-found: error
+      - name: Remove registry login
+        if: always()
+        run: |
+          export DOCKER_CONFIG="$RUNNER_TEMP/gateway-registry"
+          docker logout ghcr.io || true
