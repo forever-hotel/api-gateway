@@ -75,7 +75,6 @@ async function configureTransport(app: FastifyInstance, config: Config) {
     maxAge: 600
   });
 
-  let staffAuth: ReturnType<typeof registerStaffAuth> | undefined;
   const loginPath = (request: { method: string; url: string }) => {
     const path = request.url.split('?')[0].replace(/\/+$/, '').toLowerCase();
 
@@ -136,7 +135,7 @@ async function configureTransport(app: FastifyInstance, config: Config) {
   app.removeAllContentTypeParsers();
   app.addContentTypeParser('*', { parseAs: 'buffer' }, (_request, body, done) => done(null, body));
 
-  staffAuth = config.staffAuth ? registerStaffAuth(app, config.staffAuth) : undefined;
+  const staffAuth = config.staffAuth ? registerStaffAuth(app, config.staffAuth) : undefined;
 
   app.get('/health/live', async () => ({
     status: 'ok',
