@@ -476,6 +476,16 @@ test('login path case and trailing slash cannot create separate quotas', async t
   assert.equal((await app.inject({ method: 'POST', url: '/mad/auth/login' })).statusCode, 200);
   assert.equal((await app.inject({ method: 'POST', url: '/mad/auth/LOGIN/' })).statusCode, 429);
 });
+for (const endpoint of ['forgot-password', 'reset-password']) {
+  test(`${endpoint} uses the stricter authentication rate limit`, async t => {
+    const { app } = await fixture(t, { loginMax: 1, rateMax: 100 });
+    const url = `/hw/guests/${endpoint}`;
+    assert.equal((await app.inject({ method: 'POST', url })).statusCode, 200);
+    const response = await app.inject({ method: 'POST', url });
+    assert.equal(response.statusCode, 429);
+    assert.ok(response.headers['retry-after']);
+  });
+}
 
 test('CORS restricts origins and permits approved authorization preflight', async t => {
   const { app, calls } = await fixture(t);
