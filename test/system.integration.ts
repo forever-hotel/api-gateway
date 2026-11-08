@@ -43,12 +43,22 @@ test(
     const requireBackend = createRequire(resolve(backend, 'package.json'));
     const websocket = resolve(process.env.SHARED_WEBSOCKET_PATH ?? '../websocket');
     const requireWebsocket = createRequire(resolve(websocket, 'package.json'));
-    const expectedProtocol = requireBackend('./dist/realtime/relay-contracts.js') as object;
-    const sharedProtocol = requireWebsocket('./dist/contracts.js') as Record<string, unknown>;
-    assert.deepEqual(
-      Object.fromEntries(Object.keys(expectedProtocol).map(key => [key, sharedProtocol[key]])),
-      expectedProtocol
-    );
+    type RelayProtocol = {
+      REALTIME_EXCHANGE: string;
+      channels: readonly string[];
+      eventChannels: Record<string, string>;
+    };
+    const expectedProtocol = requireBackend('./dist/realtime/relay-contracts.js') as RelayProtocol;
+    const sharedProtocol = requireWebsocket('./dist/contracts.js') as RelayProtocol;
+    // Shared transport also serves other subsystems. Additive events are compatible;
+    // every MAD channel and event mapping must still be supported unchanged.
+    assert.equal(sharedProtocol.REALTIME_EXCHANGE, expectedProtocol.REALTIME_EXCHANGE);
+    for (const channel of expectedProtocol.channels) {
+      assert.ok(sharedProtocol.channels.includes(channel), `Shared transport is missing MAD channel: ${channel}`);
+    }
+    for (const [event, channel] of Object.entries(expectedProtocol.eventChannels)) {
+      assert.equal(sharedProtocol.eventChannels[event], channel, `Shared transport changed MAD event: ${event}`);
+    }
     const { NestFactory } = requireWebsocket('@nestjs/core') as {
       NestFactory: { create(module: unknown, options: { logger: false }): Promise<SharedApp> };
     };
@@ -89,7 +99,7 @@ test(
     await database.query(`CREATE TABLE staff_users(worker_id uuid PRIMARY KEY,username text,email text,password_hash text,role text,roles text[] DEFAULT ARRAY['MANAGER'],is_active boolean,password_change_required boolean,session_version integer,failed_attempts integer,locked_until timestamptz,updated_at timestamptz);
     CREATE TABLE mad_revoked_sessions(token_hash text PRIMARY KEY,expires_at timestamptz);`);
     await database.query(
-      "INSERT INTO staff_users VALUES($1,'manager','manager@example.invalid',$2,'MANAGER',true,false,0,0,NULL,now())",
+      "INSERT INTO staff_users(worker_id,username,email,password_hash,role,is_active,password_change_required,session_version,failed_attempts,locked_until,updated_at) VALUES($1,'manager','manager@example.invalid',$2,'MANAGER',true,false,0,0,NULL,now())",
       [id, await hashPassword(password)]
     );
     const config = loadConfig({ ALLOWED_ORIGINS: 'http://localhost:3000', WS_URL: 'http://127.0.0.1:1' }, [
