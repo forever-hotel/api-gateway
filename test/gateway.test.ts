@@ -10,6 +10,27 @@ import type { Config } from '../src/config.ts';
 import { requestPath } from '../src/http.ts';
 import { readFileSync } from 'node:fs';
 
+test('shipped KMS routes remove the gateway prefix for all native kitchen endpoints', async t => {
+  const shippedRoutes: unknown = JSON.parse(readFileSync('config/routes.json', 'utf8'));
+  const { app, calls } = await fixture(t, {}, shippedRoutes);
+  for (const path of [
+    '/api/v1/menu/items',
+    '/api/v1/menu/categories',
+    '/api/v1/orders?limit=100',
+    '/api/v1/guest/menu'
+  ]) {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/kms' + path,
+      headers: { authorization: 'Bearer contract-token' }
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(calls.at(-1)?.service, 'kms');
+    assert.equal(calls.at(-1)?.path, path);
+    assert.equal(calls.at(-1)?.headers.authorization, 'Bearer contract-token');
+  }
+});
+
 test('HW forwards PayHere form notifications byte-for-byte without guest authentication', async t => {
   const shippedRoutes: unknown = JSON.parse(readFileSync('config/routes.json', 'utf8'));
   const { app, calls } = await fixture(t, {}, shippedRoutes);
@@ -305,8 +326,8 @@ test('FDS shipped routing removes prefix and preserves other subsystem routes', 
   assert.equal(calls.at(-1)?.path, '/check-in');
   assert.equal(calls.at(-1)?.body, '{}');
 
-  // These four routes must retain exactly their existing upstream paths.
-  for (const id of ['mad', 'foss', 'kms', 'wkms']) {
+  // These routes retain their native subsystem prefixes; KMS strips its gateway prefix.
+  for (const id of ['mad', 'foss', 'wkms']) {
     const response = await app.inject({ url: `/${id}/rooms` });
 
     assert.equal(response.statusCode, 200, `${id} returned wrong status`);
