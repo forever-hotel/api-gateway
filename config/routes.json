@@ -52,7 +52,7 @@
     "id": "kms",
     "enabled": true,
     "prefix": "/kms",
-    "rewritePrefix": "/kms",
+    "rewritePrefix": "",
     "upstreamEnv": "KMS_SERVICE_URL",
     "cookieNames": ["kms_session", "kms_csrf"]
   },
