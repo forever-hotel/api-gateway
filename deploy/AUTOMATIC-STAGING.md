@@ -8,6 +8,6 @@ Settings: SERVICE_STAGING_ENABLED=true, STAGING_HOST, STAGING_USER; develop-only
 
 The shared action independently verifies the source repository, latest release commit and final-head peer approval. It uses approved VM configuration, shared locks and previous-image recovery. It does not apply SQL or edit env files, routes, Caddy or broker settings. Coordinate compatible database and configuration changes separately. Run browser business checks after deployment; readiness is not full feature verification.
 
-Shared implementation and tests: forever-hotel/infra commit e1f320d8c3b7622339291f70c1acd3b7458df439, docs/SERVICE-AUTODEPLOY.md. Review and merge the infra action PR before approving this service PR. Future shared-action updates require a reviewed pin change. Production is unchanged.
+Shared implementation and tests: forever-hotel/infra commit ec9d483c73910945b224bd66682b69b2a15eb10c, docs/SERVICE-AUTODEPLOY.md. Review and merge the infra action PR before approving this service PR. Future shared-action updates require a reviewed pin change. Production is unchanged.
 
 A full-system infra release must align its selected images with successful service receipts. The updated infra controller rejects conflicts to avoid silently reverting automatically deployed services.

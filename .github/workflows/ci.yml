@@ -134,7 +134,7 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Deploy this run's reviewed immutable images
-        uses: forever-hotel/infra/.github/actions/deploy-service@e1f320d8c3b7622339291f70c1acd3b7458df439
+        uses: forever-hotel/infra/.github/actions/deploy-service@ec9d483c73910945b224bd66682b69b2a15eb10c
         with:
           service: gateway
           artifact: gateway-release-image
