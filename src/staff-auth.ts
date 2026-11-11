@@ -249,7 +249,7 @@ export class StaffAuth {
       if (subsystem && !systemRole(accountRoles(account), subsystem))
         throw new GatewayError(403, 'FORBIDDEN', 'You do not have access to this subsystem.');
       await client.query(
-        'UPDATE public.staff_users SET failed_attempts=0,locked_until=NULL,updated_at=now() WHERE worker_id=$1',
+        `UPDATE public.staff_users SET failed_attempts=0,locked_until=NULL,updated_at=now()${Object.hasOwn(account, 'last_login_at') ? ',last_login_at=clock_timestamp()' : ''} WHERE worker_id=$1`,
         [account.worker_id]
       );
       const issued = this.issue(account, subsystem);
