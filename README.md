@@ -198,3 +198,13 @@ The parent repository currently ignores api-gateway.
 Hotel website integration: /hw/room-types, /hw/contact/enquiries, and
 /hw/guests/{register,login,me} forward to the same paths without /hw.
 Guest authentication uses the backend Authorization bearer token contract.
+
+## Staff last-login recording
+
+Apply `sql/staff-last-login.sql` manually as schema owner, then deploy the gateway
+and MAD backend/frontend changes. The migration adds nullable `staff_users.last_login_at`
+and grants its update to `hotel_auth`; grant the same column privilege to a custom
+restricted auth role if used. No startup migration or historical backfill runs.
+Successful authorized staff logins record the database clock; failed logins and
+session checks do not. Before migration, login remains compatible and MAD shows
+no recorded login. Existing timestamps are unavailable until the next successful login.

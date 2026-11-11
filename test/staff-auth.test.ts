@@ -268,7 +268,7 @@ test('password recovery restricts both steps to the requesting subsystem roles',
       },
       release() {}
     };
-    t.mock.method(auth.database, 'connect', async () => client);
+    t.mock.method(auth.database, 'connect', async () => client as never);
     await auth.requestReset('person@example.invalid', system);
     await assert.rejects(
       auth.resetPassword(
@@ -283,4 +283,25 @@ test('password recovery restricts both steps to the requesting subsystem roles',
       error => (error as { status: number }).status === 400
     );
   }
+});
+
+test('last login is recorded only after successful authentication on upgraded schemas', async t => {
+  const auth = new StaffAuth(config);
+  t.after(() => auth.database.end());
+  const password = 'private-test-password';
+  const upgraded = { ...account, last_login_at: null, password_hash: await hashPassword(password) };
+  const queries: string[] = [];
+  const client = {
+    query: async (sql: string) => {
+      queries.push(sql);
+      return { rows: sql.startsWith('SELECT') ? [upgraded] : [] };
+    },
+    release: () => undefined
+  };
+  t.mock.method(auth.database, 'connect', async () => client as never);
+  await auth.login({ username: 'manager', password }, 'mad');
+  assert.ok(queries.some(sql => sql.includes('last_login_at=clock_timestamp()')));
+  queries.length = 0;
+  await assert.rejects(auth.login({ username: 'manager', password: 'incorrect' }, 'mad'));
+  assert.ok(!queries.some(sql => sql.includes('last_login_at=')));
 });
